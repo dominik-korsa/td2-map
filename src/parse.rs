@@ -32,6 +32,28 @@ pub(crate) enum TrackShape {
     },
 }
 
+impl TrackShape {
+    pub(crate) fn start(&self) -> &Vec3 {
+        match self {
+            TrackShape::Straight { start, .. } => start,
+            TrackShape::Arc { start, .. } => start,
+            TrackShape::Bezier { start, .. } => start,
+        }
+    }
+
+    pub(crate) fn end(&self) -> &Vec3 {
+        match self {
+            TrackShape::Straight { end, .. } => end,
+            TrackShape::Arc { end, .. } => end,
+            TrackShape::Bezier { end, .. } => end,
+        }
+    }
+
+    pub(crate) fn lowest_y(&self) -> f32 {
+        self.start().y.min(self.end().y)
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct Track {
     pub(crate) id: i32,
