@@ -1,8 +1,8 @@
 use crate::parse::{ParseResult, Track, TrackShape};
-use std::path;
-use std::path::PathBuf;
+use std::fs;
+use std::path::Path;
+use svg::node::element;
 use svg::node::element::path::Data;
-use svg::node::element::Path;
 use svg::Document;
 
 fn path_data(track: &Track) -> Data {
@@ -39,12 +39,12 @@ fn path_data(track: &Track) -> Data {
     }
 }
 
-pub(crate) fn create_svg(parse_result: &ParseResult) -> anyhow::Result<PathBuf> {
+pub(crate) fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyhow::Result<()> {
     let mut document = Document::new().set("viewBox", (-5000, -5000, 5000, 5000));
 
     for track in &parse_result.tracks {
         let data = path_data(track);
-        let path = Path::new()
+        let path = element::Path::new()
             .set("d", data)
             .set("fill", "none")
             .set(
@@ -59,7 +59,9 @@ pub(crate) fn create_svg(parse_result: &ParseResult) -> anyhow::Result<PathBuf> 
         document = document.add(path);
     }
 
-    let path = path::PathBuf::from("output.svg");
-    svg::save(&path, &document).map_err(|e| anyhow::anyhow!("Failed to save SVG: {}", e))?;
-    Ok(path)
+    if let Some(dir) = output_path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    svg::save(output_path, &document).map_err(|e| anyhow::anyhow!("Failed to save SVG: {}", e))?;
+    Ok(())
 }

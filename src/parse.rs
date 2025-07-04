@@ -162,7 +162,6 @@ pub(crate) fn parse<R: Read>(input: R) -> anyhow::Result<ParseResult> {
                         state = State::Route;
                     }
                     "Track" => {
-                        println!("{:?}", cells);
                         let track = parse_track(&cells).expect("Failed to parse track");
                         tracks.push(track);
                     }
