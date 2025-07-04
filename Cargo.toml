@@ -1,0 +1,10 @@
+[package]
+name = "td2-map"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.98"
+glam = { version = "0.30.4", features = ["glam-assert"] }
+nalgebra = "0.33.2"
+svg = "0.18.0"
