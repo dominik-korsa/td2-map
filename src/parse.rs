@@ -1,6 +1,6 @@
-use crate::math::get_projected_ellipse_axes;
+use crate::math::RotatedCircle;
 use anyhow::ensure;
-use glam::{Mat3, Vec2, Vec3};
+use glam::{Mat3, Vec3};
 use std::io::{BufRead, BufReader, Read};
 
 #[derive(Debug)]
@@ -17,12 +17,9 @@ pub(crate) enum TrackShape {
     },
     Arc {
         start: Vec3,
-        ellipse_center: Vec3,
+        center: Vec3,
         end: Vec3,
-        radius: f32,
-
-        projection_first_axis: Vec2,
-        projection_second_axis: Vec2,
+        rotated_circle: RotatedCircle,
     },
     Bezier {
         start: Vec3,
@@ -114,19 +111,14 @@ fn parse_normal_track(cells: &[&str]) -> anyhow::Result<Track> {
         let end_rotation = Mat3::from_rotation_y(-length / radius);
         let start_to_end = -radius_vec + end_rotation * radius_vec;
 
-        let ellipse_center = start - rotation * radius_vec;
+        let center = start - rotation * radius_vec;
         let end = start + rotation * start_to_end;
-
-        let (projection_first_axis, projection_second_axis) =
-            get_projected_ellipse_axes(radius, rotation);
 
         TrackShape::Arc {
             start,
-            ellipse_center,
+            center,
             end,
-            radius,
-            projection_first_axis,
-            projection_second_axis,
+            rotated_circle: RotatedCircle::new(radius, rotation),
         }
     };
 
@@ -143,7 +135,6 @@ fn parse_bezier_track(cells: &[&str]) -> anyhow::Result<Track> {
     let start_to_end = parse_position(&cells[9..12])? - start;
     let end_to_control2 = parse_position(&cells[12..15])?;
     let start_to_control2 = start_to_end + end_to_control2;
-    // let rotation = parse_transform(&cells[15..18])?;
     let rotation = Mat3::IDENTITY;
 
     Ok(Track {

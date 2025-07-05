@@ -1,3 +1,4 @@
+use crate::math::{project_circle, project_vec};
 use crate::parse::{ParseResult, Track, TrackShape};
 use std::fs;
 use std::path::Path;
@@ -6,33 +7,45 @@ use svg::node::element::path::Data;
 use svg::{Document, Node};
 
 fn path_data(track: &Track) -> Data {
-    match track.shape {
+    match &track.shape {
         TrackShape::Straight { start, end } => {
+            let projected_start = project_vec(start);
+            let projected_end = project_vec(end);
+
             let data = Data::new()
-                .move_to((start.x, start.z))
-                .line_to((end.x, end.z));
+                .move_to((projected_start.x, projected_start.y))
+                .line_to((projected_end.x, projected_end.y));
             data
         }
-        TrackShape::Arc { start, end, projection_first_axis, projection_second_axis, radius, .. } => {
+        TrackShape::Arc { start, end, rotated_circle, .. } => {
+            let projected_start = project_vec(start);
+            let projected_end = project_vec(end);
+            let projected_circle = project_circle(&rotated_circle);
+
             let data = Data::new()
-                .move_to((start.x, start.z))
+                .move_to((projected_start.x, projected_start.y))
                 .elliptical_arc_to((
-                    projection_first_axis.length(),
-                    projection_second_axis.length(),
-                    projection_first_axis.to_angle(),
+                    projected_circle.major_axis.length(),
+                    projected_circle.minor_axis.length(),
+                    projected_circle.major_axis.to_angle(),
                     0, // large arc flag off
-                    if radius > 0.0 { 1 } else { 0 },
-                    end.x, end.z,
+                    if rotated_circle.original_radius() > 0.0 { 0 } else { 1 },
+                    projected_end.x, projected_end.y,
                 ));
             data
         }
         TrackShape::Bezier { start, control1, control2, end } => {
+            let projected_start = project_vec(start);
+            let projected_control1 = project_vec(control1);
+            let projected_control2 = project_vec(control2);
+            let projected_end = project_vec(end);
+
             let data = Data::new()
-                .move_to((start.x, start.z))
+                .move_to((projected_start.x, projected_start.y))
                 .cubic_curve_to((
-                    control1.x, control1.z,
-                    control2.x, control2.z,
-                    end.x, end.z,
+                    projected_control1.x, projected_control1.y,
+                    projected_control2.x, projected_control2.y,
+                    projected_end.x, projected_end.y,
                 ));
             data
         }
@@ -82,10 +95,12 @@ pub(crate) fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyh
         map_elements.push(MapElement { y: track.shape.lowest_y() - 4.0, node: Box::new(background_path) });
         map_elements.push(MapElement { y: track.shape.lowest_y(), node: Box::new(track_path) });
 
-        min_x = min_x.min(track.shape.start().x).min(track.shape.end().x);
-        max_x = max_x.max(track.shape.start().x).max(track.shape.end().x);
-        min_z = min_z.min(track.shape.start().z).min(track.shape.end().z);
-        max_z = max_z.max(track.shape.start().z).max(track.shape.end().z);
+        let projected_start = project_vec(track.shape.start());
+        let projected_end = project_vec(track.shape.end());
+        min_x = min_x.min(projected_start.x).min(projected_end.x);
+        max_x = max_x.max(projected_start.x).max(projected_end.x);
+        min_z = min_z.min(projected_start.y).min(projected_end.y);
+        max_z = max_z.max(projected_start.y).max(projected_end.y);
     }
 
     let min_x = min_x as i64 - 100;
