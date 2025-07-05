@@ -122,8 +122,8 @@ pub(crate) fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyh
             Rectangle::new()
                 .set("x", min_x)
                 .set("y", min_z)
-                .set("width", "100%")
-                .set("height", "100%")
+                .set("width", max_x - min_x)
+                .set("height", max_z - min_z)
                 .set("fill", BG_COLOR)
         );
 
