@@ -8,6 +8,7 @@ use std::io::{BufRead, BufReader, Read};
 enum State {
     Default,
     Route,
+    TerrainGroup,
 }
 
 #[derive(Debug)]
@@ -287,6 +288,10 @@ pub(crate) fn parse<R: Read>(input: R) -> anyhow::Result<ParseResult> {
 
     let mut state = State::Default;
     lines.flatten().for_each(|line| {
+        if line.is_empty() {
+            return;
+        }
+
         let cells: Vec<&str> = line.split(";").collect();
         let row_kind = cells[0];
 
@@ -294,6 +299,9 @@ pub(crate) fn parse<R: Read>(input: R) -> anyhow::Result<ParseResult> {
             State::Default => match row_kind {
                 "Route" => {
                     state = State::Route;
+                }
+                "TerrainGroup" => {
+                    state = State::TerrainGroup;
                 }
                 "Track" => match parse_track(&cells) {
                     Ok(track) => tracks.push(track),
@@ -305,13 +313,18 @@ pub(crate) fn parse<R: Read>(input: R) -> anyhow::Result<ParseResult> {
                 },
                 "TrackObject" | "Misc" | "Fence" | "Wires" | "TerrainPoint" | "MiscGroup"
                 | "EndMiscGroup" | "SSPController" | "SSPRepeater" | "scv029" | "shv001"
-                | "WorldRotation" | "WorldTranslation" | "MainCamera" | "CameraHome" => {}
+                | "WorldRotation" | "WorldTranslation" | "MainCamera" | "CameraHome" => {},
                 extra => {
                     println!("Unknown kind: {extra}")
                 }
             },
             State::Route => {
                 if row_kind == "EndRoute" {
+                    state = State::Default;
+                }
+            },
+            State::TerrainGroup => {
+                if row_kind == "EndTerrainGroup" {
                     state = State::Default;
                 }
             }
