@@ -198,6 +198,37 @@ fn build_simple_switch(
     track_shapes
 }
 
+fn build_curve_switch(
+    start: Vec3,
+    rotation: Mat3,
+    left_radius: f32,
+    right_radius: f32,
+    denominator: f32,
+) -> Vec<TrackShape> {
+    let angle_between_rad = (1.0 / denominator).atan();
+    let left_angle = angle_between_rad * (left_radius / (right_radius - left_radius));
+    let right_angle = angle_between_rad * (right_radius / (right_radius - left_radius));
+
+    let left_circle = RotatedCircle::new(-left_radius, rotation);
+    let left_end = left_circle.move_by_angle(start, left_angle);
+
+    let right_circle = RotatedCircle::new(right_radius, rotation);
+    let right_end = right_circle.move_by_angle(start, right_angle);
+
+    vec![
+        TrackShape::Arc {
+            start,
+            end: left_end,
+            rotated_circle: left_circle,
+        },
+        TrackShape::Arc {
+            start,
+            end: right_end,
+            rotated_circle: right_circle,
+        }
+    ]
+}
+
 fn build_double_switch(start: Vec3, rotation: Mat3, left_track: bool, right_track: bool) -> Vec<TrackShape> {
     let radius = 190.0;
     let half_angle = (1.0f32 / 18.0).atan();
@@ -298,7 +329,7 @@ fn parse_switch(cells: &[&str]) -> anyhow::Result<Switch> {
         bail!("Switch name is missing");
     };
 
-    if let Some(captures) = regex_captures!(r"^Rz 60E1-([\d\.]+)-1_([\d\.]+) ([LR])", switch_name) {
+    if let Some(captures) = regex_captures!(r"^Rz 60E1-([\d\.]+)-1_([\d\.]+) ([LR])$", switch_name) {
         let (_, radius_str, denominator_str, direction) = captures;
         let radius = radius_str.parse::<f32>()?;
         let denominator = denominator_str.parse::<f32>()?;
@@ -309,6 +340,30 @@ fn parse_switch(cells: &[&str]) -> anyhow::Result<Switch> {
         };
 
         track_shapes.extend(build_simple_switch(start, rotation, radius, denominator, forced_total_length, direction == "L"));
+    } else if let Some(captures) = regex_captures!(r"^Rlds 60E1-([\d\.]+)-([\d\.]+)-1_([\d\.]+)$", switch_name) {
+        // let (_, radius_str_left, radius_string_right, denominator_str) = captures;
+        // ensure!(radius_str_left == radius_string_right, "Left and right radius must be equal in a symmetrical switch");
+        // let left_radius = -radius_str_left.parse::<f32>()?;
+        // let right_radius = radius_string_right.parse::<f32>()?;
+        // let denominator = denominator_str.parse::<f32>()?;
+        //
+        // track_shapes.extend(build_curve_switch(start, rotation, left_radius, right_radius, denominator));
+    } else if let Some(captures) = regex_captures!(r"^Rl([dj]) 60E1-([\d\.]+)_([\d\.]+)-1_([\d\.]+) ([LR])$", switch_name) {
+        // let (_, kind, radius_str_left, radius_string_right, denominator_str, direction) = captures;
+        // let mut left_radius = radius_str_left.parse::<f32>()?;
+        // let mut right_radius = radius_string_right.parse::<f32>()?;
+        // let denominator = denominator_str.parse::<f32>()?;
+        //
+        // if kind == "d" {
+        //     left_radius *= -1.0;
+        // }
+        //
+        // if direction == "R" {
+        //     left_radius *= -1.0;
+        //     right_radius *= -1.0;
+        // }
+        //
+        // track_shapes.extend(build_curve_switch(start, rotation, left_radius, right_radius, denominator));
     } else if switch_name == "Rkpd 60E1-190-1_9" {
         track_shapes.extend(build_double_switch(start, rotation, true, true));
     } else if switch_name == "Rkp 60E1-190-1_9 ab" || switch_name == "Rkp 60E1-190-1_9 ba" {
