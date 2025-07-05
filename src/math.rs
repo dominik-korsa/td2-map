@@ -36,6 +36,7 @@ fn get_projected_ellipse_axes(radius: f32, rotation: Mat3) -> EllipseAxes {
 }
 
 impl RotatedCircle {
+    /// Positive radius for a left curve and negative for a right curve
     pub(crate) fn new(original_radius: f32, rotation: Mat3) -> Self {
         Self {
             original_radius,
@@ -48,16 +49,18 @@ impl RotatedCircle {
         self.original_radius
     }
 
+    fn angle_rotation(&self, angle: f32) -> Mat3 {
+        Mat3::from_rotation_y(-angle * self.original_radius.signum())
+    }
+
+    pub(crate) fn end_vec(&self, angle: f32) -> Vec3 {
+        let vec_rotation = self.rotation * self.angle_rotation(angle);
+        vec_rotation * Vec3::Z
+    }
+
     pub(crate) fn move_by_angle(&self, start: Vec3, angle: f32) -> Vec3 {
-        let radius_vec = Vec3 {
-            x: self.original_radius,
-            y: 0.0,
-            z: 0.0,
-        };
-
-        let end_rotation = Mat3::from_rotation_y(angle);
-        let start_to_end = -radius_vec + end_rotation * radius_vec;
-
+        let radius_vec = self.original_radius * Vec3::X;
+        let start_to_end = -radius_vec + self.angle_rotation(angle) * radius_vec;
         start + self.rotation * start_to_end
     }
 }

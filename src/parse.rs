@@ -108,7 +108,7 @@ fn parse_normal_track(cells: &[&str]) -> anyhow::Result<Track> {
         TrackShape::Straight { start, end }
     } else {
         let circle = RotatedCircle::new(radius, rotation);
-        let angle = -length / radius;
+        let angle = length / radius.abs();
         let end = circle.move_by_angle(start, angle);
 
         TrackShape::Arc {
@@ -154,18 +154,17 @@ fn parse_track(cells: &[&str]) -> anyhow::Result<Track> {
     })
 }
 
+/// Arguments:
+/// * `radius`: Negative radius for right curve, positive for left curve
 fn build_simple_switch(
     start: Vec3,
     rotation: Mat3,
     radius: f32,
     denominator: f32,
     forced_total_length: Option<f32>,
-    is_left: bool,
 ) -> Vec<TrackShape> {
-    let curve_rad = (1.0 / denominator).atan();
-    let curve_length = radius * curve_rad;
-
-    let signed_angle = if is_left { -curve_rad } else { curve_rad };
+    let curve_angle = (1.0 / denominator).atan();
+    let curve_length = radius.abs() * curve_angle;
     let total_length = forced_total_length.unwrap_or(curve_length);
 
     let mut track_shapes: Vec<TrackShape> = vec![];
@@ -177,23 +176,23 @@ fn build_simple_switch(
         end: straight_end,
     });
 
-    let circle = RotatedCircle::new(if is_left { radius } else { -radius }, rotation);
-    let circle_end = circle.move_by_angle(start, signed_angle);
-    track_shapes.push(TrackShape::Arc {
-        start,
-        end: circle_end,
-        rotated_circle: circle,
-    });
+    let circle = RotatedCircle::new(radius, rotation);
+    let circle_end = circle.move_by_angle(start, curve_angle);
 
     if extra_straight_length > 0.1 {
-        let extra_vec =
-            rotation * Mat3::from_rotation_y(signed_angle) * extra_straight_length * Vec3::Z;
+        let extra_vec = extra_straight_length * circle.end_vec(curve_angle);
         let extra_straight_end = circle_end + extra_vec;
         track_shapes.push(TrackShape::Straight {
             start: circle_end,
             end: extra_straight_end,
         });
     }
+
+    track_shapes.push(TrackShape::Arc {
+        start,
+        end: circle_end,
+        rotated_circle: circle,
+    });
 
     track_shapes
 }
@@ -331,7 +330,7 @@ fn parse_switch(cells: &[&str]) -> anyhow::Result<Switch> {
 
     if let Some(captures) = regex_captures!(r"^Rz 60E1-([\d\.]+)-1_([\d\.]+) ([LR])$", switch_name) {
         let (_, radius_str, denominator_str, direction) = captures;
-        let radius = radius_str.parse::<f32>()?;
+        let mut radius = radius_str.parse::<f32>()?;
         let denominator = denominator_str.parse::<f32>()?;
 
         let forced_total_length = match (radius_str, denominator_str) {
@@ -339,7 +338,9 @@ fn parse_switch(cells: &[&str]) -> anyhow::Result<Switch> {
             _ => None,
         };
 
-        track_shapes.extend(build_simple_switch(start, rotation, radius, denominator, forced_total_length, direction == "L"));
+        if direction == "R" { radius *= -1.0 };
+
+        track_shapes.extend(build_simple_switch(start, rotation, radius, denominator, forced_total_length));
     } else if let Some(captures) = regex_captures!(r"^Rlds 60E1-([\d\.]+)-([\d\.]+)-1_([\d\.]+)$", switch_name) {
         // let (_, radius_str_left, radius_string_right, denominator_str) = captures;
         // ensure!(radius_str_left == radius_string_right, "Left and right radius must be equal in a symmetrical switch");
