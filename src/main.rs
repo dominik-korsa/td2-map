@@ -15,6 +15,7 @@ fn main() {
         let file = file.unwrap();
         if file.file_type().ok().is_some_and(|x| x.is_dir()) {
             let name = file.file_name().to_str().unwrap().to_string();
+            println!("Processing directory: {}", name);
             let file = File::open(file.path().join( format!("{name}.sc"))).unwrap();
             let parse_result = parse(file).unwrap();
             let output_path = PathBuf::from(format!("output/{name}.svg"));

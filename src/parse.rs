@@ -88,8 +88,7 @@ fn parse_transform(cells: &[&str]) -> anyhow::Result<Mat3> {
     let x_deg: f32 = cells[0].parse()?;
     let y_deg: f32 = cells[1].parse()?;
     let z_deg: f32 = cells[2].parse()?;
-    let rotation =
-        Mat3::from_rotation_y(y_deg.to_radians())
+    let rotation = Mat3::from_rotation_y(y_deg.to_radians())
         * Mat3::from_rotation_z(z_deg.to_radians())
         * Mat3::from_rotation_x(x_deg.to_radians());
     Ok(rotation)
@@ -103,16 +102,9 @@ fn parse_normal_track(cells: &[&str]) -> anyhow::Result<Track> {
     let radius: f32 = cells[10].parse()?;
 
     let shape = if radius == 0.0 {
-        let end = start + rotation * Vec3 {
-            x: 0.0,
-            y: 0.0,
-            z: length,
-        };
+        let end = start + rotation * length * Vec3::Z;
 
-        TrackShape::Straight {
-            start,
-            end,
-        }
+        TrackShape::Straight { start, end }
     } else {
         let circle = RotatedCircle::new(radius, rotation);
         let angle = -length / radius;
@@ -157,7 +149,7 @@ fn parse_track(cells: &[&str]) -> anyhow::Result<Track> {
     Ok(match cells[2] {
         "Track" => parse_normal_track(cells)?,
         "BTrack" => parse_bezier_track(cells)?,
-        &_ => panic!()
+        &_ => panic!(),
     })
 }
 
@@ -172,43 +164,8 @@ fn parse_switch(cells: &[&str]) -> anyhow::Result<Switch> {
     let Some(switch_name) = cells[2].split(',').next() else {
         bail!("Switch name is missing");
     };
-    if let Some(captures) = regex_captures!(r"^Rz 60E1-([\d\.]+)-1_([\d\.]+) ([LR])", switch_name) {
-        let (_, radius_str, denominator_str, direction) = captures;
-        let radius = radius_str.parse::<f32>()?;
-        let denominator = denominator_str.parse::<f32>()?;
-        let is_left = direction == "L";
-        let angle_rad = (1.0/denominator).atan();
-        let curve_length = radius * angle_rad;
-        let signed_angle = if is_left { -angle_rad } else { angle_rad };
 
-        let total_length = match (radius_str, denominator_str) {
-            ("190", "9") => 27.24,
-            _ => curve_length,
-        };
-        let extra_straight_length = total_length - curve_length;
-        let straight_end = start + rotation * total_length * Vec3::Z;
-        track_shapes.push(TrackShape::Straight {
-            start,
-            end: straight_end,
-        });
-
-        let circle = RotatedCircle::new(if is_left { radius } else { -radius }, rotation);
-        let circle_end = circle.move_by_angle(start, signed_angle);
-        track_shapes.push(TrackShape::Arc {
-            start,
-            end: circle_end,
-            rotated_circle: circle,
-        });
-
-        if extra_straight_length > 0.1 {
-            let extra_vec = rotation * Mat3::from_rotation_y(signed_angle) * extra_straight_length * Vec3::Z;
-            let extra_straight_end = circle_end + extra_vec;
-            track_shapes.push(TrackShape::Straight {
-                start: circle_end,
-                end: extra_straight_end,
-            });
-        }
-    } else if switch_name == "Rkpd 60E1-190-1_9" {
+    let mut double_switch = |left_track: bool, right_track: bool| {
         let radius = 190.0;
         let half_angle = (1.0f32 / 18.0).atan();
         let in_half_length = radius * half_angle;
@@ -236,18 +193,22 @@ fn parse_switch(cells: &[&str]) -> anyhow::Result<Switch> {
             end: point_d_in,
         });
 
-        let left_circle = RotatedCircle::new(-190.0, rotation);
-        track_shapes.push(TrackShape::Arc {
-            start: point_a_in,
-            end: point_d_in,
-            rotated_circle: left_circle,
-        });
-        let right_circle = RotatedCircle::new(190.0, rotation);
-        track_shapes.push(TrackShape::Arc {
-            start: point_b_in,
-            end: point_c_in,
-            rotated_circle: right_circle,
-        });
+        if left_track {
+            let left_circle = RotatedCircle::new(-190.0, rotation);
+            track_shapes.push(TrackShape::Arc {
+                start: point_a_in,
+                end: point_d_in,
+                rotated_circle: left_circle,
+            });
+        }
+        if right_track {
+            let right_circle = RotatedCircle::new(190.0, rotation);
+            track_shapes.push(TrackShape::Arc {
+                start: point_b_in,
+                end: point_c_in,
+                rotated_circle: right_circle,
+            });
+        }
 
         track_shapes.push(TrackShape::Straight {
             start: point_a_out,
@@ -265,23 +226,64 @@ fn parse_switch(cells: &[&str]) -> anyhow::Result<Switch> {
             start: point_d_in,
             end: point_d_out,
         });
+    };
+
+    if let Some(captures) = regex_captures!(r"^Rz 60E1-([\d\.]+)-1_([\d\.]+) ([LR])", switch_name) {
+        let (_, radius_str, denominator_str, direction) = captures;
+        let radius = radius_str.parse::<f32>()?;
+        let denominator = denominator_str.parse::<f32>()?;
+        let is_left = direction == "L";
+        let angle_rad = (1.0 / denominator).atan();
+        let curve_length = radius * angle_rad;
+        let signed_angle = if is_left { -angle_rad } else { angle_rad };
+
+        let total_length = match (radius_str, denominator_str) {
+            ("190", "9") => 27.24,
+            _ => curve_length,
+        };
+        let extra_straight_length = total_length - curve_length;
+        let straight_end = start + rotation * total_length * Vec3::Z;
+        track_shapes.push(TrackShape::Straight {
+            start,
+            end: straight_end,
+        });
+
+        let circle = RotatedCircle::new(if is_left { radius } else { -radius }, rotation);
+        let circle_end = circle.move_by_angle(start, signed_angle);
+        track_shapes.push(TrackShape::Arc {
+            start,
+            end: circle_end,
+            rotated_circle: circle,
+        });
+
+        if extra_straight_length > 0.1 {
+            let extra_vec =
+                rotation * Mat3::from_rotation_y(signed_angle) * extra_straight_length * Vec3::Z;
+            let extra_straight_end = circle_end + extra_vec;
+            track_shapes.push(TrackShape::Straight {
+                start: circle_end,
+                end: extra_straight_end,
+            });
+        }
+    } else if switch_name == "Rkpd 60E1-190-1_9" {
+        double_switch(true, true);
+    } else if switch_name == "Rkp 60E1-190-1_9 ab" || switch_name == "Rkp 60E1-190-1_9 ba" {
+        double_switch(false, true);
     } else {
         bail!("Unknown switch type {switch_name}");
     }
 
     Ok(Switch {
         id,
-        shape: SwitchShape {
-            track_shapes,
-        },
+        shape: SwitchShape { track_shapes },
     })
 }
 
 pub(crate) fn parse<R: Read>(input: R) -> anyhow::Result<ParseResult> {
     let lines = BufReader::new(input).lines();
 
-    let mut tracks: Vec<Track> = vec!();
-    let mut switches: Vec<Switch> = vec!();
+    let mut tracks: Vec<Track> = vec![];
+    let mut switches: Vec<Switch> = vec![];
 
     let mut state = State::Default;
     lines.flatten().for_each(|line| {
@@ -289,30 +291,25 @@ pub(crate) fn parse<R: Read>(input: R) -> anyhow::Result<ParseResult> {
         let row_kind = cells[0];
 
         match state {
-            State::Default => {
-                match row_kind {
-                    "Route" => {
-                        state = State::Route;
-                    }
-                    "Track" => {
-                        match parse_track(&cells) {
-                            Ok(track) => tracks.push(track),
-                            Err(e) => println!("Failed to parse track: {e}"),
-                        }
-                    }
-                    "TrackStructure" => {
-                        match parse_switch(&cells) {
-                            Ok(switch) => switches.push(switch),
-                            Err(e) => println!("Failed to parse switch: {e}"),
-                        }
-                    }
-                    "TrackObject"| "Misc" | "Fence" | "Wires" | "TerrainPoint" | "MiscGroup" | "EndMiscGroup" | "SSPController"
-                    | "SSPRepeater" | "scv029" | "shv001" | "WorldRotation" | "WorldTranslation" | "MainCamera" | "CameraHome" => {}
-                    extra => {
-                        println!("Unknown kind: {extra}")
-                    }
+            State::Default => match row_kind {
+                "Route" => {
+                    state = State::Route;
                 }
-            }
+                "Track" => match parse_track(&cells) {
+                    Ok(track) => tracks.push(track),
+                    Err(e) => println!("Failed to parse track: {e}"),
+                },
+                "TrackStructure" => match parse_switch(&cells) {
+                    Ok(switch) => switches.push(switch),
+                    Err(e) => println!("Failed to parse switch: {e}"),
+                },
+                "TrackObject" | "Misc" | "Fence" | "Wires" | "TerrainPoint" | "MiscGroup"
+                | "EndMiscGroup" | "SSPController" | "SSPRepeater" | "scv029" | "shv001"
+                | "WorldRotation" | "WorldTranslation" | "MainCamera" | "CameraHome" => {}
+                extra => {
+                    println!("Unknown kind: {extra}")
+                }
+            },
             State::Route => {
                 if row_kind == "EndRoute" {
                     state = State::Default;
@@ -321,8 +318,5 @@ pub(crate) fn parse<R: Read>(input: R) -> anyhow::Result<ParseResult> {
         }
     });
 
-    Ok(ParseResult {
-        tracks,
-        switches,
-    })
+    Ok(ParseResult { tracks, switches })
 }
