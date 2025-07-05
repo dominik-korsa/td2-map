@@ -154,6 +154,27 @@ fn parse_track(cells: &[&str]) -> anyhow::Result<Track> {
     })
 }
 
+fn build_crossing(start: Vec3, rotation: Mat3, half_length: f32, half_angle: f32) -> Vec<TrackShape> {
+    let unit_vec_left = Mat3::from_rotation_y(-half_angle) * Vec3::Z;
+    let unit_vec_right = Mat3::from_rotation_y(half_angle) * Vec3::Z;
+
+    let point_a = start + rotation * half_length * unit_vec_left;
+    let point_b = start + rotation * half_length * unit_vec_right;
+    let point_c = start + rotation * (half_length * -unit_vec_left);
+    let point_d = start + rotation * (half_length * -unit_vec_right);
+
+    vec![
+        TrackShape::Straight {
+            start: point_a,
+            end: point_c,
+        },
+        TrackShape::Straight {
+            start: point_b,
+            end: point_d,
+        },
+    ]
+}
+
 fn parse_switch(cells: &[&str]) -> anyhow::Result<Switch> {
     ensure!(cells.len() >= 19);
     let id = cells[1].parse()?;
@@ -270,6 +291,14 @@ fn parse_switch(cells: &[&str]) -> anyhow::Result<Switch> {
         double_switch(true, true);
     } else if switch_name == "Rkp 60E1-190-1_9 ab" || switch_name == "Rkp 60E1-190-1_9 ba" {
         double_switch(false, true);
+    } else if switch_name == "Crossing4.444" {
+        let half_angle = 0.1111;
+        let half_length = 10.0;
+        track_shapes.extend(build_crossing(start, rotation, half_length, half_angle));
+    } else if switch_name == "Crossing" {
+        let half_angle = (1.0f32 / 18.0).atan();
+        let half_length = 10.0;
+        track_shapes.extend(build_crossing(start, rotation, half_length, half_angle));
     } else {
         bail!("Unknown switch type {switch_name}");
     }
