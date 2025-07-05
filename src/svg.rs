@@ -1,9 +1,10 @@
 use crate::math::{project_circle, project_vec};
-use crate::parse::{ParseResult, SwitchShape, TrackShape};
+use crate::parse::{ParseResult, TrackShape};
 use std::fs;
 use std::path::Path;
 use svg::node::element;
 use svg::node::element::path::Data;
+use svg::node::element::Rectangle;
 use svg::{Document, Node};
 
 fn path_data(track_shape: &TrackShape) -> Data {
@@ -58,6 +59,9 @@ struct MapElement {
 }
 
 pub(crate) fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyhow::Result<()> {
+    static BG_COLOR: &str = "#11202D";
+    static TRACK_COLOR: &str = "#eee";
+
     let mut document = Document::new();
 
     let mut map_elements: Vec<MapElement> = vec![];
@@ -67,69 +71,44 @@ pub(crate) fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyh
     let mut min_z: f32 = f32::MAX;
     let mut max_z: f32 = f32::MIN;
 
-    for track in &parse_result.tracks {
-        let data = path_data(&track.shape);
+    let mut add_track = |shape: &TrackShape, id: &str| {
+        let data = path_data(shape);
 
         let background_path = element::Path::new()
             .set("d", data.clone())
-            .set("id", format!("track_bg_{}", track.id))
+            .set("id", id)
             .set("fill", "none")
-            .set("stroke", "#fff")
+            .set("stroke", BG_COLOR)
             .set("stroke-width", 12.0)
             .set("stroke-linecap", "round");
 
         let track_path = element::Path::new()
-            .set("id", format!("track_{}", track.id))
+            .set("id", format!("bg_{id}"))
             .set("d", data)
             .set("fill", "none")
-            .set(
-                "stroke",
-                match track.shape {
-                    TrackShape::Straight { .. } => "black",
-                    TrackShape::Arc { .. } => "blue",
-                    TrackShape::Bezier { .. } => "red",
-                },
-            )
-            .set("stroke-width", 1.75);
+            .set("stroke", TRACK_COLOR)
+            .set("stroke-width", 1.2)
+            .set("stroke-linecap", "round");
 
-        map_elements.push(MapElement { y: track.shape.lowest_y() - 4.0, node: Box::new(background_path) });
-        map_elements.push(MapElement { y: track.shape.lowest_y(), node: Box::new(track_path) });
+        map_elements.push(MapElement { y: shape.lowest_y() - 4.0, node: Box::new(background_path) });
+        map_elements.push(MapElement { y: shape.lowest_y(), node: Box::new(track_path) });
 
-        let projected_start = project_vec(track.shape.start());
-        let projected_end = project_vec(track.shape.end());
+        let projected_start = project_vec(shape.start());
+        let projected_end = project_vec(shape.end());
         min_x = min_x.min(projected_start.x).min(projected_end.x);
         max_x = max_x.max(projected_start.x).max(projected_end.x);
         min_z = min_z.min(projected_start.y).min(projected_end.y);
         max_z = max_z.max(projected_start.y).max(projected_end.y);
+    };
+
+    for track in &parse_result.tracks {
+        add_track(&track.shape, &format!("track_bg_{}", track.id));
     }
 
     for switch in &parse_result.switches {
-        let data = match &switch.shape {
-            SwitchShape::Split { first_shape, .. } => {
-                path_data(first_shape)
-            }
-        };
-        //
-        // let background_path = element::Path::new()
-        //     .set("d", data.clone())
-        //     .set("id", format!("track_bg_{}", track.id))
-        //     .set("fill", "none")
-        //     .set("stroke", "#fff")
-        //     .set("stroke-width", 12.0)
-        //     .set("stroke-linecap", "round");
-
-        let track_path = element::Path::new()
-            .set("id", format!("switch_demo_{}", switch.id))
-            .set("d", data)
-            .set("fill", "none")
-            .set("stroke", "magenta")
-            .set("stroke-width", 1.75);
-
-        // map_elements.push(MapElement { y: track.shape.lowest_y() - 4.0, node: Box::new(background_path) });
-        map_elements.push(MapElement {
-            y: match &switch.shape { SwitchShape::Split { first_shape } => first_shape.lowest_y() },
-            node: Box::new(track_path),
-        });
+        for (index, track_shape) in switch.shape.track_shapes.iter().enumerate() {
+            add_track(track_shape, &format!("switch_track_{}_{}", switch.id, index));
+        }
     }
 
     let min_x = min_x as i64 - 100;
@@ -137,7 +116,16 @@ pub(crate) fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyh
     let min_z = min_z as i64 - 100;
     let max_z = max_z as i64 + 100;
 
-    document = document.set("viewBox", (min_x, min_z, max_x - min_x, max_z - min_z));
+    document = document
+        .set("viewBox", (min_x, min_z, max_x - min_x, max_z - min_z))
+        .add(
+            Rectangle::new()
+                .set("x", min_x)
+                .set("y", min_z)
+                .set("width", "100%")
+                .set("height", "100%")
+                .set("fill", BG_COLOR)
+        );
 
     map_elements.sort_by_key(|x| x.y as i64);
 

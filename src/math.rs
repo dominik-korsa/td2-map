@@ -47,6 +47,19 @@ impl RotatedCircle {
     pub(crate) fn original_radius(&self) -> f32 {
         self.original_radius
     }
+
+    pub(crate) fn move_by_angle(&self, start: Vec3, angle: f32) -> Vec3 {
+        let radius_vec = Vec3 {
+            x: self.original_radius,
+            y: 0.0,
+            z: 0.0,
+        };
+
+        let end_rotation = Mat3::from_rotation_y(angle);
+        let start_to_end = -radius_vec + end_rotation * radius_vec;
+
+        start + self.rotation * start_to_end
+    }
 }
 
 fn transform(input: Vec2) -> Vec2  {

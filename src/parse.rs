@@ -18,7 +18,6 @@ pub(crate) enum TrackShape {
     },
     Arc {
         start: Vec3,
-        center: Vec3,
         end: Vec3,
         rotated_circle: RotatedCircle,
     },
@@ -31,10 +30,8 @@ pub(crate) enum TrackShape {
 }
 
 #[derive(Debug)]
-pub(crate) enum SwitchShape {
-    Split {
-        first_shape: TrackShape,
-    }
+pub(crate) struct SwitchShape {
+    pub(crate) track_shapes: Vec<TrackShape>,
 }
 
 impl TrackShape {
@@ -117,23 +114,14 @@ fn parse_normal_track(cells: &[&str]) -> anyhow::Result<Track> {
             end,
         }
     } else {
-        let radius_vec = Vec3 {
-            x: radius,
-            y: 0.0,
-            z: 0.0,
-        };
-
-        let end_rotation = Mat3::from_rotation_y(-length / radius);
-        let start_to_end = -radius_vec + end_rotation * radius_vec;
-
-        let center = start - rotation * radius_vec;
-        let end = start + rotation * start_to_end;
+        let circle = RotatedCircle::new(radius, rotation);
+        let angle = -length / radius;
+        let end = circle.move_by_angle(start, angle);
 
         TrackShape::Arc {
             start,
-            center,
             end,
-            rotated_circle: RotatedCircle::new(radius, rotation),
+            rotated_circle: circle,
         }
     };
 
@@ -190,23 +178,42 @@ fn parse_switch(cells: &[&str]) -> anyhow::Result<Switch> {
     let is_left = direction == "L";
     let angle_rad = (1.0/denominator).atan();
     let curve_length = radius * angle_rad;
+    let signed_angle = if is_left { -angle_rad } else { angle_rad };
+
+    let mut track_shapes: Vec<TrackShape> = vec![];
 
     let total_length = match (radius_str, denominator_str) {
-        ("190", "9") => Some(27.24),
-        // ("190", "1.75") => ,
-        _ => None,
+        ("190", "9") => 27.24,
+        _ => curve_length,
     };
-    let extra_length = total_length.map(|total_length| total_length - curve_length);
+    let extra_straight_length = total_length - curve_length;
+    let straight_end = start + rotation * total_length * Vec3::Z;
+    track_shapes.push(TrackShape::Straight {
+        start,
+        end: straight_end,
+    });
 
-    let end = start + rotation * (curve_length + extra_length.unwrap_or(0.0)) * Vec3::Z;
+    let circle = RotatedCircle::new(if is_left { radius } else { -radius }, rotation);
+    let circle_end = circle.move_by_angle(start, signed_angle);
+    track_shapes.push(TrackShape::Arc {
+        start,
+        end: circle_end,
+        rotated_circle: circle,
+    });
+
+    if extra_straight_length > 0.1 {
+        let extra_vec = rotation * Mat3::from_rotation_y(signed_angle) * extra_straight_length * Vec3::Z;
+        let extra_straight_end = circle_end + extra_vec;
+        track_shapes.push(TrackShape::Straight {
+            start: circle_end,
+            end: extra_straight_end,
+        });
+    }
 
     Ok(Switch {
         id: cells[1].parse()?,
-        shape: SwitchShape::Split {
-            first_shape: TrackShape::Straight {
-                start,
-                end,
-            },
+        shape: SwitchShape {
+            track_shapes,
         },
     })
 }
