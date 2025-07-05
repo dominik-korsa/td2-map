@@ -1,6 +1,7 @@
 use crate::math::RotatedCircle;
-use anyhow::ensure;
+use anyhow::{bail, ensure};
 use glam::{Mat3, Vec3};
+use lazy_regex::regex_captures;
 use std::io::{BufRead, BufReader, Read};
 
 #[derive(Debug)]
@@ -27,6 +28,13 @@ pub(crate) enum TrackShape {
         control2: Vec3,
         end: Vec3,
     },
+}
+
+#[derive(Debug)]
+pub(crate) enum SwitchShape {
+    Split {
+        first_shape: TrackShape,
+    }
 }
 
 impl TrackShape {
@@ -58,8 +66,15 @@ pub(crate) struct Track {
 }
 
 #[derive(Debug)]
+pub(crate) struct Switch {
+    pub(crate) id: i32,
+    pub(crate) shape: SwitchShape,
+}
+
+#[derive(Debug)]
 pub(crate) struct ParseResult {
     pub(crate) tracks: Vec<Track>,
+    pub(crate) switches: Vec<Switch>,
 }
 
 fn parse_position(cells: &[&str]) -> anyhow::Result<Vec3> {
@@ -150,7 +165,7 @@ fn parse_bezier_track(cells: &[&str]) -> anyhow::Result<Track> {
 
 // https://wiki.td2.info.pl/index.php?title=Scenery_format
 fn parse_track(cells: &[&str]) -> anyhow::Result<Track> {
-    assert!(cells.len() >= 3);
+    ensure!(cells.len() >= 3);
     Ok(match cells[2] {
         "Track" => parse_normal_track(cells)?,
         "BTrack" => parse_bezier_track(cells)?,
@@ -158,10 +173,49 @@ fn parse_track(cells: &[&str]) -> anyhow::Result<Track> {
     })
 }
 
+fn parse_switch(cells: &[&str]) -> anyhow::Result<Switch> {
+    ensure!(cells.len() >= 19);
+    let start = parse_position(&cells[3..6])?;
+    let rotation = parse_transform(&cells[6..9])?;
+
+    let Some(switch_name) = cells[2].split(',').next() else {
+        bail!("Switch name is missing");
+    };
+    let Some(captures) = regex_captures!(r"^Rz 60E1-([\d\.]+)-1_([\d\.]+) ([LR])", switch_name)  else {
+        bail!("Unknown switch type {switch_name}");
+    };
+    let (_, radius_str, denominator_str, direction) = captures;
+    let radius = radius_str.parse::<f32>()?;
+    let denominator = denominator_str.parse::<f32>()?;
+    let is_left = direction == "L";
+    let angle_rad = (1.0/denominator).atan();
+    let curve_length = radius * angle_rad;
+
+    let total_length = match (radius_str, denominator_str) {
+        ("190", "9") => Some(27.24),
+        // ("190", "1.75") => ,
+        _ => None,
+    };
+    let extra_length = total_length.map(|total_length| total_length - curve_length);
+
+    let end = start + rotation * (curve_length + extra_length.unwrap_or(0.0)) * Vec3::Z;
+
+    Ok(Switch {
+        id: cells[1].parse()?,
+        shape: SwitchShape::Split {
+            first_shape: TrackShape::Straight {
+                start,
+                end,
+            },
+        },
+    })
+}
+
 pub(crate) fn parse<R: Read>(input: R) -> anyhow::Result<ParseResult> {
     let lines = BufReader::new(input).lines();
 
     let mut tracks: Vec<Track> = vec!();
+    let mut switches: Vec<Switch> = vec!();
 
     let mut state = State::Default;
     lines.flatten().for_each(|line| {
@@ -175,12 +229,19 @@ pub(crate) fn parse<R: Read>(input: R) -> anyhow::Result<ParseResult> {
                         state = State::Route;
                     }
                     "Track" => {
-                        let track = parse_track(&cells).expect("Failed to parse track");
-                        tracks.push(track);
+                        match parse_track(&cells) {
+                            Ok(track) => tracks.push(track),
+                            Err(e) => println!("Failed to parse track: {e}"),
+                        }
                     }
-                    "TrackObject" | "TrackStructure" => {}
-                    "Misc" | "Fence" | "Wires" | "TerrainPoint" | "MiscGroup" | "EndMiscGroup" | "SSPController" | "SSPRepeater"
-                    | "scv029" | "shv001" | "WorldRotation" | "WorldTranslation" | "MainCamera" | "CameraHome" => {}
+                    "TrackStructure" => {
+                        match parse_switch(&cells) {
+                            Ok(switch) => switches.push(switch),
+                            Err(e) => println!("Failed to parse switch: {e}"),
+                        }
+                    }
+                    "TrackObject"| "Misc" | "Fence" | "Wires" | "TerrainPoint" | "MiscGroup" | "EndMiscGroup" | "SSPController"
+                    | "SSPRepeater" | "scv029" | "shv001" | "WorldRotation" | "WorldTranslation" | "MainCamera" | "CameraHome" => {}
                     extra => {
                         println!("Unknown kind: {extra}")
                     }
@@ -196,5 +257,6 @@ pub(crate) fn parse<R: Read>(input: R) -> anyhow::Result<ParseResult> {
 
     Ok(ParseResult {
         tracks,
+        switches,
     })
 }

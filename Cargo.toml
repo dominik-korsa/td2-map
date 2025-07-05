@@ -8,3 +8,4 @@ anyhow = "1.0.98"
 glam = { version = "0.30.4", features = ["glam-assert"] }
 nalgebra = "0.33.2"
 svg = "0.18.0"
+lazy-regex = "3.4.1"

@@ -1,13 +1,13 @@
 use crate::math::{project_circle, project_vec};
-use crate::parse::{ParseResult, Track, TrackShape};
+use crate::parse::{ParseResult, SwitchShape, TrackShape};
 use std::fs;
 use std::path::Path;
 use svg::node::element;
 use svg::node::element::path::Data;
 use svg::{Document, Node};
 
-fn path_data(track: &Track) -> Data {
-    match &track.shape {
+fn path_data(track_shape: &TrackShape) -> Data {
+    match track_shape {
         TrackShape::Straight { start, end } => {
             let projected_start = project_vec(start);
             let projected_end = project_vec(end);
@@ -68,7 +68,7 @@ pub(crate) fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyh
     let mut max_z: f32 = f32::MIN;
 
     for track in &parse_result.tracks {
-        let data = path_data(track);
+        let data = path_data(&track.shape);
 
         let background_path = element::Path::new()
             .set("d", data.clone())
@@ -101,6 +101,35 @@ pub(crate) fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyh
         max_x = max_x.max(projected_start.x).max(projected_end.x);
         min_z = min_z.min(projected_start.y).min(projected_end.y);
         max_z = max_z.max(projected_start.y).max(projected_end.y);
+    }
+
+    for switch in &parse_result.switches {
+        let data = match &switch.shape {
+            SwitchShape::Split { first_shape, .. } => {
+                path_data(first_shape)
+            }
+        };
+        //
+        // let background_path = element::Path::new()
+        //     .set("d", data.clone())
+        //     .set("id", format!("track_bg_{}", track.id))
+        //     .set("fill", "none")
+        //     .set("stroke", "#fff")
+        //     .set("stroke-width", 12.0)
+        //     .set("stroke-linecap", "round");
+
+        let track_path = element::Path::new()
+            .set("id", format!("switch_demo_{}", switch.id))
+            .set("d", data)
+            .set("fill", "none")
+            .set("stroke", "magenta")
+            .set("stroke-width", 1.75);
+
+        // map_elements.push(MapElement { y: track.shape.lowest_y() - 4.0, node: Box::new(background_path) });
+        map_elements.push(MapElement {
+            y: match &switch.shape { SwitchShape::Split { first_shape } => first_shape.lowest_y() },
+            node: Box::new(track_path),
+        });
     }
 
     let min_x = min_x as i64 - 100;
