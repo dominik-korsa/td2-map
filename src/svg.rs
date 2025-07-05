@@ -87,7 +87,7 @@ pub(crate) fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyh
             .set("d", data)
             .set("fill", "none")
             .set("stroke", TRACK_COLOR)
-            .set("stroke-width", 1.2)
+            .set("stroke-width", 0.5)
             .set("stroke-linecap", "round");
 
         map_elements.push(MapElement { y: shape.lowest_y() - 4.0, node: Box::new(background_path) });
