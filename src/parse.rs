@@ -154,6 +154,117 @@ fn parse_track(cells: &[&str]) -> anyhow::Result<Track> {
     })
 }
 
+fn build_simple_switch(
+    start: Vec3,
+    rotation: Mat3,
+    radius: f32,
+    denominator: f32,
+    forced_total_length: Option<f32>,
+    is_left: bool,
+) -> Vec<TrackShape> {
+    let curve_rad = (1.0 / denominator).atan();
+    let curve_length = radius * curve_rad;
+
+    let signed_angle = if is_left { -curve_rad } else { curve_rad };
+    let total_length = forced_total_length.unwrap_or(curve_length);
+
+    let mut track_shapes: Vec<TrackShape> = vec![];
+
+    let extra_straight_length = total_length - curve_length;
+    let straight_end = start + rotation * total_length * Vec3::Z;
+    track_shapes.push(TrackShape::Straight {
+        start,
+        end: straight_end,
+    });
+
+    let circle = RotatedCircle::new(if is_left { radius } else { -radius }, rotation);
+    let circle_end = circle.move_by_angle(start, signed_angle);
+    track_shapes.push(TrackShape::Arc {
+        start,
+        end: circle_end,
+        rotated_circle: circle,
+    });
+
+    if extra_straight_length > 0.1 {
+        let extra_vec =
+            rotation * Mat3::from_rotation_y(signed_angle) * extra_straight_length * Vec3::Z;
+        let extra_straight_end = circle_end + extra_vec;
+        track_shapes.push(TrackShape::Straight {
+            start: circle_end,
+            end: extra_straight_end,
+        });
+    }
+
+    track_shapes
+}
+
+fn build_double_switch(start: Vec3, rotation: Mat3, left_track: bool, right_track: bool) -> Vec<TrackShape> {
+    let radius = 190.0;
+    let half_angle = (1.0f32 / 18.0).atan();
+    let in_half_length = radius * half_angle;
+    let out_half_length = 33.17 / 2.0;
+
+    let unit_vec_left = Mat3::from_rotation_y(-half_angle) * Vec3::Z;
+    let unit_vec_right = Mat3::from_rotation_y(half_angle) * Vec3::Z;
+
+    let point_a_in = start + rotation * in_half_length * unit_vec_left;
+    let point_b_in = start + rotation * in_half_length * unit_vec_right;
+    let point_c_in = start + rotation * (in_half_length * -unit_vec_left);
+    let point_d_in = start + rotation * (in_half_length * -unit_vec_right);
+
+    let point_a_out = start + rotation * out_half_length * unit_vec_left;
+    let point_b_out = start + rotation * out_half_length * unit_vec_right;
+    let point_c_out = start + rotation * (out_half_length * -unit_vec_left);
+    let point_d_out = start + rotation * (out_half_length * -unit_vec_right);
+
+    let mut track_shapes: Vec<TrackShape> = vec![];
+
+    track_shapes.push(TrackShape::Straight {
+        start: point_a_in,
+        end: point_c_in,
+    });
+    track_shapes.push(TrackShape::Straight {
+        start: point_b_in,
+        end: point_d_in,
+    });
+
+    if left_track {
+        let left_circle = RotatedCircle::new(-190.0, rotation);
+        track_shapes.push(TrackShape::Arc {
+            start: point_a_in,
+            end: point_d_in,
+            rotated_circle: left_circle,
+        });
+    }
+    if right_track {
+        let right_circle = RotatedCircle::new(190.0, rotation);
+        track_shapes.push(TrackShape::Arc {
+            start: point_b_in,
+            end: point_c_in,
+            rotated_circle: right_circle,
+        });
+    }
+
+    track_shapes.push(TrackShape::Straight {
+        start: point_a_out,
+        end: point_a_in,
+    });
+    track_shapes.push(TrackShape::Straight {
+        start: point_b_out,
+        end: point_b_in,
+    });
+    track_shapes.push(TrackShape::Straight {
+        start: point_c_in,
+        end: point_c_out,
+    });
+    track_shapes.push(TrackShape::Straight {
+        start: point_d_in,
+        end: point_d_out,
+    });
+
+    track_shapes
+}
+
 fn build_crossing(start: Vec3, rotation: Mat3, half_length: f32, half_angle: f32) -> Vec<TrackShape> {
     let unit_vec_left = Mat3::from_rotation_y(-half_angle) * Vec3::Z;
     let unit_vec_right = Mat3::from_rotation_y(half_angle) * Vec3::Z;
@@ -187,117 +298,30 @@ fn parse_switch(cells: &[&str]) -> anyhow::Result<Switch> {
         bail!("Switch name is missing");
     };
 
-    let mut double_switch = |left_track: bool, right_track: bool| {
-        let radius = 190.0;
-        let half_angle = (1.0f32 / 18.0).atan();
-        let in_half_length = radius * half_angle;
-        let out_half_length = 33.17 / 2.0;
-
-        let unit_vec_left = Mat3::from_rotation_y(-half_angle) * Vec3::Z;
-        let unit_vec_right = Mat3::from_rotation_y(half_angle) * Vec3::Z;
-
-        let point_a_in = start + rotation * in_half_length * unit_vec_left;
-        let point_b_in = start + rotation * in_half_length * unit_vec_right;
-        let point_c_in = start + rotation * (in_half_length * -unit_vec_left);
-        let point_d_in = start + rotation * (in_half_length * -unit_vec_right);
-
-        let point_a_out = start + rotation * out_half_length * unit_vec_left;
-        let point_b_out = start + rotation * out_half_length * unit_vec_right;
-        let point_c_out = start + rotation * (out_half_length * -unit_vec_left);
-        let point_d_out = start + rotation * (out_half_length * -unit_vec_right);
-
-        track_shapes.push(TrackShape::Straight {
-            start: point_a_in,
-            end: point_c_in,
-        });
-        track_shapes.push(TrackShape::Straight {
-            start: point_b_in,
-            end: point_d_in,
-        });
-
-        if left_track {
-            let left_circle = RotatedCircle::new(-190.0, rotation);
-            track_shapes.push(TrackShape::Arc {
-                start: point_a_in,
-                end: point_d_in,
-                rotated_circle: left_circle,
-            });
-        }
-        if right_track {
-            let right_circle = RotatedCircle::new(190.0, rotation);
-            track_shapes.push(TrackShape::Arc {
-                start: point_b_in,
-                end: point_c_in,
-                rotated_circle: right_circle,
-            });
-        }
-
-        track_shapes.push(TrackShape::Straight {
-            start: point_a_out,
-            end: point_a_in,
-        });
-        track_shapes.push(TrackShape::Straight {
-            start: point_b_out,
-            end: point_b_in,
-        });
-        track_shapes.push(TrackShape::Straight {
-            start: point_c_in,
-            end: point_c_out,
-        });
-        track_shapes.push(TrackShape::Straight {
-            start: point_d_in,
-            end: point_d_out,
-        });
-    };
-
     if let Some(captures) = regex_captures!(r"^Rz 60E1-([\d\.]+)-1_([\d\.]+) ([LR])", switch_name) {
         let (_, radius_str, denominator_str, direction) = captures;
         let radius = radius_str.parse::<f32>()?;
         let denominator = denominator_str.parse::<f32>()?;
-        let is_left = direction == "L";
-        let angle_rad = (1.0 / denominator).atan();
-        let curve_length = radius * angle_rad;
-        let signed_angle = if is_left { -angle_rad } else { angle_rad };
 
-        let total_length = match (radius_str, denominator_str) {
-            ("190", "9") => 27.24,
-            _ => curve_length,
+        let forced_total_length = match (radius_str, denominator_str) {
+            ("190", "9") => Some(27.24),
+            _ => None,
         };
-        let extra_straight_length = total_length - curve_length;
-        let straight_end = start + rotation * total_length * Vec3::Z;
-        track_shapes.push(TrackShape::Straight {
-            start,
-            end: straight_end,
-        });
 
-        let circle = RotatedCircle::new(if is_left { radius } else { -radius }, rotation);
-        let circle_end = circle.move_by_angle(start, signed_angle);
-        track_shapes.push(TrackShape::Arc {
-            start,
-            end: circle_end,
-            rotated_circle: circle,
-        });
-
-        if extra_straight_length > 0.1 {
-            let extra_vec =
-                rotation * Mat3::from_rotation_y(signed_angle) * extra_straight_length * Vec3::Z;
-            let extra_straight_end = circle_end + extra_vec;
-            track_shapes.push(TrackShape::Straight {
-                start: circle_end,
-                end: extra_straight_end,
-            });
-        }
+        track_shapes.extend(build_simple_switch(start, rotation, radius, denominator, forced_total_length, direction == "L"));
     } else if switch_name == "Rkpd 60E1-190-1_9" {
-        double_switch(true, true);
+        track_shapes.extend(build_double_switch(start, rotation, true, true));
     } else if switch_name == "Rkp 60E1-190-1_9 ab" || switch_name == "Rkp 60E1-190-1_9 ba" {
-        double_switch(false, true);
+        track_shapes.extend(build_double_switch(start, rotation, false, true));
     } else if switch_name == "Crossing4.444" {
         let half_angle = 0.1111;
         let half_length = 10.0;
+
         track_shapes.extend(build_crossing(start, rotation, half_length, half_angle));
     } else if switch_name == "Crossing" {
         let half_angle = (1.0f32 / 18.0).atan();
         let half_length = 10.0;
+
         track_shapes.extend(build_crossing(start, rotation, half_length, half_angle));
     } else {
         bail!("Unknown switch type {switch_name}");
