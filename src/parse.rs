@@ -200,30 +200,29 @@ fn build_simple_switch(
 fn build_curve_switch(
     start: Vec3,
     rotation: Mat3,
-    left_radius: f32,
-    right_radius: f32,
+    main_radius: f32,
+    diverging_radius: f32,
     denominator: f32,
 ) -> Vec<TrackShape> {
-    let angle_between_rad = (1.0 / denominator).atan();
-    let left_angle = angle_between_rad * (left_radius / (right_radius - left_radius));
-    let right_angle = angle_between_rad * (right_radius / (right_radius - left_radius));
+    let diverging_angle = (1.0 / denominator).atan();
+    let main_angle = (diverging_angle * diverging_radius / main_radius).abs();
 
-    let left_circle = RotatedCircle::new(-left_radius, rotation);
-    let left_end = left_circle.move_by_angle(start, left_angle);
+    let main_circle = RotatedCircle::new(main_radius, rotation);
+    let main_end = main_circle.move_by_angle(start, main_angle);
 
-    let right_circle = RotatedCircle::new(right_radius, rotation);
-    let right_end = right_circle.move_by_angle(start, right_angle);
+    let diverging_circle = RotatedCircle::new(diverging_radius, rotation);
+    let diverging_end = diverging_circle.move_by_angle(start, diverging_angle);
 
     vec![
         TrackShape::Arc {
             start,
-            end: left_end,
-            rotated_circle: left_circle,
+            end: main_end,
+            rotated_circle: main_circle,
         },
         TrackShape::Arc {
             start,
-            end: right_end,
-            rotated_circle: right_circle,
+            end: diverging_end,
+            rotated_circle: diverging_circle,
         }
     ]
 }
@@ -342,29 +341,29 @@ fn parse_switch(cells: &[&str]) -> anyhow::Result<Switch> {
 
         track_shapes.extend(build_simple_switch(start, rotation, radius, denominator, forced_total_length));
     } else if let Some(captures) = regex_captures!(r"^Rlds 60E1-([\d\.]+)-([\d\.]+)-1_([\d\.]+)$", switch_name) {
-        // let (_, radius_str_left, radius_string_right, denominator_str) = captures;
-        // ensure!(radius_str_left == radius_string_right, "Left and right radius must be equal in a symmetrical switch");
-        // let left_radius = -radius_str_left.parse::<f32>()?;
-        // let right_radius = radius_string_right.parse::<f32>()?;
-        // let denominator = denominator_str.parse::<f32>()?;
-        //
-        // track_shapes.extend(build_curve_switch(start, rotation, left_radius, right_radius, denominator));
+        let (_, radius_str_left, radius_string_right, denominator_str) = captures;
+        ensure!(radius_str_left == radius_string_right, "Left and right radius must be equal in a symmetrical switch");
+        let left_radius = radius_str_left.parse::<f32>()?;
+        let right_radius = -radius_string_right.parse::<f32>()?;
+        let denominator = denominator_str.parse::<f32>()?;
+
+        track_shapes.extend(build_curve_switch(start, rotation, left_radius, right_radius, denominator));
     } else if let Some(captures) = regex_captures!(r"^Rl([dj]) 60E1-([\d\.]+)_([\d\.]+)-1_([\d\.]+) ([LR])$", switch_name) {
-        // let (_, kind, radius_str_left, radius_string_right, denominator_str, direction) = captures;
-        // let mut left_radius = radius_str_left.parse::<f32>()?;
-        // let mut right_radius = radius_string_right.parse::<f32>()?;
-        // let denominator = denominator_str.parse::<f32>()?;
-        //
-        // if kind == "d" {
-        //     left_radius *= -1.0;
-        // }
-        //
-        // if direction == "R" {
-        //     left_radius *= -1.0;
-        //     right_radius *= -1.0;
-        // }
-        //
-        // track_shapes.extend(build_curve_switch(start, rotation, left_radius, right_radius, denominator));
+        let (_, kind, diverging_radius, small_radius_str, denominator_str, direction) = captures;
+        let main_radius = diverging_radius.parse::<f32>()?;
+        let diverging_radius = small_radius_str.parse::<f32>()?;
+        ensure!(main_radius >= diverging_radius);
+        let denominator = denominator_str.parse::<f32>()?;
+
+        let (main_radius, diverging_radius) = match (kind, direction) {
+            ("j", "L") => (main_radius, diverging_radius),
+            ("j", "R") => (-main_radius, -diverging_radius),
+            ("d", "L") => (-main_radius, diverging_radius),
+            ("d", "R") => (main_radius, -diverging_radius),
+            _ => bail!("Unknown switch kind {kind} or direction {direction}"),
+        };
+
+        track_shapes.extend(build_curve_switch(start, rotation, main_radius, diverging_radius, denominator));
     } else if switch_name == "Rkpd 60E1-190-1_9" {
         track_shapes.extend(build_double_switch(start, rotation, true, true));
     } else if switch_name == "Rkp 60E1-190-1_9 ab" || switch_name == "Rkp 60E1-190-1_9 ba" {

@@ -71,7 +71,7 @@ pub(crate) fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyh
     let mut min_z: f32 = f32::MAX;
     let mut max_z: f32 = f32::MIN;
 
-    let mut add_track = |shape: &TrackShape, id: &str| {
+    let mut add_track = |shape: &TrackShape, id: &str, highlight: Option<&str>| {
         let data = path_data(shape);
 
         let background_path = element::Path::new()
@@ -86,7 +86,7 @@ pub(crate) fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyh
             .set("id", format!("bg_{id}"))
             .set("d", data)
             .set("fill", "none")
-            .set("stroke", TRACK_COLOR)
+            .set("stroke", highlight.unwrap_or(TRACK_COLOR))
             .set("stroke-width", 0.5)
             .set("stroke-linecap", "round");
 
@@ -102,12 +102,12 @@ pub(crate) fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyh
     };
 
     for track in &parse_result.tracks {
-        add_track(&track.shape, &format!("track_bg_{}", track.id));
+        add_track(&track.shape, &format!("track_{}", track.id), None);
     }
 
     for switch in &parse_result.switches {
         for (index, track_shape) in switch.shape.track_shapes.iter().enumerate() {
-            add_track(track_shape, &format!("switch_track_{}_{}", switch.id, index));
+            add_track(track_shape, &format!("switch_track_{}_{}", switch.id, index), Some("magenta"));
         }
     }
 
