@@ -1,7 +1,7 @@
 use crate::math::RotatedCircle;
+use crate::track_structures::{Crossing, ForkSwitch, SlipSwitch, TrackStructure, TRACK_STRUCTURES};
 use anyhow::{bail, ensure};
 use glam::{Mat3, Vec3};
-use lazy_regex::regex_captures;
 use std::io::{BufRead, BufReader, Read};
 
 #[derive(Debug)]
@@ -58,21 +58,21 @@ impl TrackShape {
 }
 
 #[derive(Debug)]
-pub(crate) struct Track {
-    pub(crate) id: i32,
+pub struct Track {
+    pub id: i32,
     pub(crate) shape: TrackShape,
 }
 
 #[derive(Debug)]
-pub(crate) struct Switch {
-    pub(crate) id: i32,
+pub struct Switch {
+    pub id: i32,
     pub(crate) shape: SwitchShape,
 }
 
 #[derive(Debug)]
-pub(crate) struct ParseResult {
-    pub(crate) tracks: Vec<Track>,
-    pub(crate) switches: Vec<Switch>,
+pub struct ParseResult {
+    pub tracks: Vec<Track>,
+    pub switches: Vec<Switch>,
 }
 
 fn parse_position(cells: &[&str]) -> anyhow::Result<Vec3> {
@@ -154,33 +154,29 @@ fn parse_track(cells: &[&str]) -> anyhow::Result<Track> {
     })
 }
 
-/// Arguments:
-/// * `radius`: Negative radius for right curve, positive for left curve
-fn build_simple_switch(
+fn build_fork_half(
     start: Vec3,
     rotation: Mat3,
     radius: f32,
-    denominator: f32,
-    forced_total_length: Option<f32>,
+    curve_length: f32,
+    added_length: f32,
 ) -> Vec<TrackShape> {
-    let curve_angle = (1.0 / denominator).atan();
-    let curve_length = radius.abs() * curve_angle;
-    let total_length = forced_total_length.unwrap_or(curve_length);
+    if radius == 0.0 {
+        return vec![TrackShape::Straight {
+            start,
+            end: start + rotation * (curve_length + added_length) * Vec3::Z,
+        }];
+    }
 
-    let mut track_shapes: Vec<TrackShape> = vec![];
-
-    let extra_straight_length = total_length - curve_length;
-    let straight_end = start + rotation * total_length * Vec3::Z;
-    track_shapes.push(TrackShape::Straight {
-        start,
-        end: straight_end,
-    });
-
+    let angle = curve_length / radius.abs();
     let circle = RotatedCircle::new(radius, rotation);
-    let circle_end = circle.move_by_angle(start, curve_angle);
+    let circle_end = circle.move_by_angle(start, angle);
 
-    if extra_straight_length > 0.1 {
-        let extra_vec = extra_straight_length * circle.end_vec(curve_angle);
+    let mut track_shapes: Vec<TrackShape> = vec![
+
+    ];
+    if added_length > 0.0 {
+        let extra_vec = added_length * circle.end_vec(angle);
         let extra_straight_end = circle_end + extra_vec;
         track_shapes.push(TrackShape::Straight {
             start: circle_end,
@@ -197,41 +193,21 @@ fn build_simple_switch(
     track_shapes
 }
 
-fn build_curve_switch(
+fn build_fork_switch(
     start: Vec3,
     rotation: Mat3,
-    main_radius: f32,
-    diverging_radius: f32,
-    denominator: f32,
+    fork: &ForkSwitch,
 ) -> Vec<TrackShape> {
-    let diverging_angle = (1.0 / denominator).atan();
-    let main_angle = (diverging_angle * diverging_radius / main_radius).abs();
-
-    let main_circle = RotatedCircle::new(main_radius, rotation);
-    let main_end = main_circle.move_by_angle(start, main_angle);
-
-    let diverging_circle = RotatedCircle::new(diverging_radius, rotation);
-    let diverging_end = diverging_circle.move_by_angle(start, diverging_angle);
-
-    vec![
-        TrackShape::Arc {
-            start,
-            end: main_end,
-            rotated_circle: main_circle,
-        },
-        TrackShape::Arc {
-            start,
-            end: diverging_end,
-            rotated_circle: diverging_circle,
-        }
-    ]
+    let mut left = build_fork_half(start, rotation, fork.radius_left, fork.curve_length, fork.added_length);
+    let right = build_fork_half(start, rotation, fork.radius_right, fork.curve_length, fork.added_length);
+    left.extend(right);
+    left
 }
 
-fn build_double_switch(start: Vec3, rotation: Mat3, left_track: bool, right_track: bool) -> Vec<TrackShape> {
-    let radius = 190.0;
-    let half_angle = (1.0f32 / 18.0).atan();
-    let in_half_length = radius * half_angle;
-    let out_half_length = 33.17 / 2.0;
+fn build_slip_switch(start: Vec3, rotation: Mat3, slip: &SlipSwitch) -> Vec<TrackShape> {
+    let half_angle = (slip.tangent / 2.0).atan();
+    let in_half_length = slip.radius * half_angle;
+    let out_half_length = slip.length / 2.0;
 
     let unit_vec_left = Mat3::from_rotation_y(-half_angle) * Vec3::Z;
     let unit_vec_right = Mat3::from_rotation_y(half_angle) * Vec3::Z;
@@ -257,7 +233,7 @@ fn build_double_switch(start: Vec3, rotation: Mat3, left_track: bool, right_trac
         end: point_d_in,
     });
 
-    if left_track {
+    if slip.left_slip {
         let left_circle = RotatedCircle::new(-190.0, rotation);
         track_shapes.push(TrackShape::Arc {
             start: point_a_in,
@@ -265,7 +241,7 @@ fn build_double_switch(start: Vec3, rotation: Mat3, left_track: bool, right_trac
             rotated_circle: left_circle,
         });
     }
-    if right_track {
+    if slip.right_slip {
         let right_circle = RotatedCircle::new(190.0, rotation);
         track_shapes.push(TrackShape::Arc {
             start: point_b_in,
@@ -294,7 +270,10 @@ fn build_double_switch(start: Vec3, rotation: Mat3, left_track: bool, right_trac
     track_shapes
 }
 
-fn build_crossing(start: Vec3, rotation: Mat3, half_length: f32, half_angle: f32) -> Vec<TrackShape> {
+fn build_crossing(start: Vec3, rotation: Mat3, crossing: &Crossing) -> Vec<TrackShape> {
+    let half_angle = (1.0 / crossing.tangent).atan() / 2.0;
+    let half_length = crossing.length / 2.0;
+
     let unit_vec_left = Mat3::from_rotation_y(-half_angle) * Vec3::Z;
     let unit_vec_right = Mat3::from_rotation_y(half_angle) * Vec3::Z;
 
@@ -315,7 +294,7 @@ fn build_crossing(start: Vec3, rotation: Mat3, half_length: f32, half_angle: f32
     ]
 }
 
-fn parse_switch(cells: &[&str]) -> anyhow::Result<Switch> {
+fn parse_track_structure(cells: &[&str]) -> anyhow::Result<Switch> {
     ensure!(cells.len() >= 19);
     let id = cells[1].parse()?;
     let start = parse_position(&cells[3..6])?;
@@ -323,63 +302,19 @@ fn parse_switch(cells: &[&str]) -> anyhow::Result<Switch> {
 
     let mut track_shapes: Vec<TrackShape> = vec![];
 
-    let Some(switch_name) = cells[2].split(',').next() else {
-        bail!("Switch name is missing");
+    let Some(structure_name) = cells[2].split(',').next() else {
+        bail!("Track structure name is missing");
     };
 
-    if let Some(captures) = regex_captures!(r"^Rz 60E1-([\d\.]+)-1_([\d\.]+) ([LR])$", switch_name) {
-        let (_, radius_str, denominator_str, direction) = captures;
-        let mut radius = radius_str.parse::<f32>()?;
-        let denominator = denominator_str.parse::<f32>()?;
-
-        let forced_total_length = match (radius_str, denominator_str) {
-            ("190", "9") => Some(27.24),
-            _ => None,
+    if let Some(track_structure) = TRACK_STRUCTURES.get(structure_name) {
+        let shapes = match track_structure {
+            TrackStructure::Fork(fork) => build_fork_switch(start, rotation, fork),
+            TrackStructure::Slip(slip) => build_slip_switch(start, rotation, slip),
+            TrackStructure::Crossing(crossing) => build_crossing(start, rotation, crossing),
         };
-
-        if direction == "R" { radius *= -1.0 };
-
-        track_shapes.extend(build_simple_switch(start, rotation, radius, denominator, forced_total_length));
-    } else if let Some(captures) = regex_captures!(r"^Rlds 60E1-([\d\.]+)-([\d\.]+)-1_([\d\.]+)$", switch_name) {
-        let (_, radius_str_left, radius_string_right, denominator_str) = captures;
-        ensure!(radius_str_left == radius_string_right, "Left and right radius must be equal in a symmetrical switch");
-        let left_radius = radius_str_left.parse::<f32>()?;
-        let right_radius = -radius_string_right.parse::<f32>()?;
-        let denominator = denominator_str.parse::<f32>()?;
-
-        track_shapes.extend(build_curve_switch(start, rotation, left_radius, right_radius, denominator));
-    } else if let Some(captures) = regex_captures!(r"^Rl([dj]) 60E1-([\d\.]+)_([\d\.]+)-1_([\d\.]+) ([LR])$", switch_name) {
-        let (_, kind, diverging_radius, small_radius_str, denominator_str, direction) = captures;
-        let main_radius = diverging_radius.parse::<f32>()?;
-        let diverging_radius = small_radius_str.parse::<f32>()?;
-        ensure!(main_radius >= diverging_radius);
-        let denominator = denominator_str.parse::<f32>()?;
-
-        let (main_radius, diverging_radius) = match (kind, direction) {
-            ("j", "L") => (main_radius, diverging_radius),
-            ("j", "R") => (-main_radius, -diverging_radius),
-            ("d", "L") => (-main_radius, diverging_radius),
-            ("d", "R") => (main_radius, -diverging_radius),
-            _ => bail!("Unknown switch kind {kind} or direction {direction}"),
-        };
-
-        track_shapes.extend(build_curve_switch(start, rotation, main_radius, diverging_radius, denominator));
-    } else if switch_name == "Rkpd 60E1-190-1_9" {
-        track_shapes.extend(build_double_switch(start, rotation, true, true));
-    } else if switch_name == "Rkp 60E1-190-1_9 ab" || switch_name == "Rkp 60E1-190-1_9 ba" {
-        track_shapes.extend(build_double_switch(start, rotation, false, true));
-    } else if switch_name == "Crossing4.444" {
-        let half_angle = 0.1111;
-        let half_length = 10.0;
-
-        track_shapes.extend(build_crossing(start, rotation, half_length, half_angle));
-    } else if switch_name == "Crossing" {
-        let half_angle = (1.0f32 / 18.0).atan();
-        let half_length = 10.0;
-
-        track_shapes.extend(build_crossing(start, rotation, half_length, half_angle));
+        track_shapes.extend(shapes);
     } else {
-        bail!("Unknown switch type {switch_name}");
+        bail!("Unknown switch type {structure_name}");
     }
 
     Ok(Switch {
@@ -388,7 +323,7 @@ fn parse_switch(cells: &[&str]) -> anyhow::Result<Switch> {
     })
 }
 
-pub(crate) fn parse<R: Read>(input: R) -> anyhow::Result<ParseResult> {
+pub fn parse<R: Read>(input: R) -> anyhow::Result<ParseResult> {
     let lines = BufReader::new(input).lines();
 
     let mut tracks: Vec<Track> = vec![];
@@ -415,7 +350,7 @@ pub(crate) fn parse<R: Read>(input: R) -> anyhow::Result<ParseResult> {
                     Ok(track) => tracks.push(track),
                     Err(e) => println!("Failed to parse track: {e}"),
                 },
-                "TrackStructure" => match parse_switch(&cells) {
+                "TrackStructure" => match parse_track_structure(&cells) {
                     Ok(switch) => switches.push(switch),
                     Err(e) => println!("Failed to parse switch: {e}"),
                 },

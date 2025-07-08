@@ -1,16 +1,13 @@
-use rayon::iter::ParallelIterator;
-mod parse;
-mod svg;
-mod math;
-
-use crate::parse::parse;
-use crate::svg::create_svg;
 use anyhow::bail;
 use indicatif::ParallelProgressIterator;
+use parse::parse;
 use rayon::iter::IntoParallelRefIterator;
+use rayon::iter::ParallelIterator;
 use std::fs;
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use td2_map::parse;
+use td2_map::svg::create_svg;
 
 fn process_scenery(dir: &Path) -> anyhow::Result<()> {
     let Some(filename) = dir.file_name() else {
@@ -23,7 +20,6 @@ fn process_scenery(dir: &Path) -> anyhow::Result<()> {
     let parse_result = parse(file)?;
     let output_path = PathBuf::from(format!("output/{name}.svg"));
     create_svg(&parse_result, &output_path)?;
-    // println!("Processed scenery: {}", name);
     Ok(())
 }
 

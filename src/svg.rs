@@ -58,7 +58,7 @@ struct MapElement {
     node: Box<dyn Node>,
 }
 
-pub(crate) fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyhow::Result<()> {
+pub fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyhow::Result<()> {
     static BG_COLOR: &str = "#11202D";
     static TRACK_COLOR: &str = "#eee";
 
