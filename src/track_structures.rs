@@ -159,11 +159,11 @@ fn try_parse_slip_switch(config: &HashMap<String, String>) -> Option<SlipSwitch>
 
 // Values for prefabs extracted from game assets, version 2025.2.3.
 // `added_length` Rz 60E1-205-1_9 and Rz 60E1-265-1_10 fixed manually.
-// Crossings were also added manually.
+// Crossings and slip switches were also added manually.
 pub(crate) static TRACK_STRUCTURES: phf::Map<&'static str, TrackStructure> = phf_map! {
-    "Rkp 60E1-190-1_9 ab" => Slip(SlipSwitch { length: 33.165, radius: 190.0, tangent: 9.0, left_slip: true, right_slip: false }),
-    "Rkp 60E1-190-1_9 ba" => Slip(SlipSwitch { length: 33.165, radius: 190.0, tangent: 9.0, left_slip: true, right_slip: false }),
-    "Rkpd 60E1-190-1_9" => Slip(SlipSwitch { length: 33.165, radius: 190.0, tangent: 9.0, left_slip: true, right_slip: true }),
+    "Rkp 60E1-190-1_9 ab" => Slip(SlipSwitch { length: 33.165 /* added manually */, radius: 190.0, tangent: 9.0, left_slip: true, right_slip: false }),
+    "Rkp 60E1-190-1_9 ba" => Slip(SlipSwitch { length: 33.165 /* added manually */, radius: 190.0, tangent: 9.0, left_slip: true, right_slip: false }),
+    "Rkpd 60E1-190-1_9" => Slip(SlipSwitch { length: 33.165 /* added manually */, radius: 190.0, tangent: 9.0, left_slip: true, right_slip: true }),
     "Rld 60E1-1200_600-1_15 L" => Fork(ForkSwitch { radius_left: 600.0, radius_right: -1200.0, curve_length: 39.95566, tangent: 12.0, added_length: 0.0 }),
     "Rld 60E1-1200_600-1_15 R" => Fork(ForkSwitch { radius_left: 1200.0, radius_right: -600.0, curve_length: 39.95566, tangent: 12.0, added_length: 0.0 }),
     "Rld 60E1-1200_900-1_18.5 L" => Fork(ForkSwitch { radius_left: 900.0, radius_right: -1200.0, curve_length: 48.61317, tangent: 12.0, added_length: 0.0 }),

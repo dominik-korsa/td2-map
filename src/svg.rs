@@ -1,4 +1,4 @@
-use crate::math::{project_circle, project_vec};
+use crate::math::{project_circle, project_pos};
 use crate::parse::{ParseResult, Track, TrackShape};
 use std::fs;
 use std::path::Path;
@@ -9,18 +9,18 @@ use svg::{Document, Node};
 
 fn path_data(track_shape: &TrackShape) -> Data {
     match track_shape {
-        TrackShape::Straight { start, end } => {
-            let projected_start = project_vec(start);
-            let projected_end = project_vec(end);
+        TrackShape::Straight { start, end_pos: end, .. } => {
+            let projected_start = project_pos(&start.pos);
+            let projected_end = project_pos(end);
 
             let data = Data::new()
                 .move_to((projected_start.x, projected_start.y))
                 .line_to((projected_end.x, projected_end.y));
             data
         }
-        TrackShape::Arc { start, end, rotated_circle, .. } => {
-            let projected_start = project_vec(start);
-            let projected_end = project_vec(end);
+        TrackShape::Arc { start_pos, end, rotated_circle, .. } => {
+            let projected_start = project_pos(start_pos);
+            let projected_end = project_pos(&end.pos);
             let projected_circle = project_circle(&rotated_circle);
 
             let data = Data::new()
@@ -35,11 +35,11 @@ fn path_data(track_shape: &TrackShape) -> Data {
                 ));
             data
         }
-        TrackShape::Bezier { start, control1, control2, end } => {
-            let projected_start = project_vec(start);
-            let projected_control1 = project_vec(control1);
-            let projected_control2 = project_vec(control2);
-            let projected_end = project_vec(end);
+        TrackShape::Bezier { start_pos: start, control1, control2, end_pos: end } => {
+            let projected_start = project_pos(start);
+            let projected_control1 = project_pos(control1);
+            let projected_control2 = project_pos(control2);
+            let projected_end = project_pos(end);
 
             let data = Data::new()
                 .move_to((projected_start.x, projected_start.y))
@@ -49,6 +49,12 @@ fn path_data(track_shape: &TrackShape) -> Data {
                     projected_end.x, projected_end.y,
                 ));
             data
+        }
+        TrackShape::Point(point) => {
+            let projected_point = project_pos(&point.pos);
+            Data::new()
+                .move_to((projected_point.x, projected_point.y))
+                .line_to((projected_point.x, projected_point.y))
         }
     }
 }
@@ -72,39 +78,37 @@ pub fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyhow::Res
     let mut max_z: f32 = f32::MIN;
 
     let mut add_track = |track: &Track, highlight: Option<&str>| {
-        if track.shape.start() != track.shape.end() || true { // TODO: Remove || true
-            let data = path_data(&track.shape);
+        let data = path_data(&track.shape);
 
-            let label = format!(
-                "Track {}, prev: {} next: {}",
-                track.ids.own,
-                track.ids.prev.map(|x| x.to_string()).unwrap_or("-".to_string()),
-                track.ids.next.map(|x| x.to_string()).unwrap_or("-".to_string()),
-            );
+        let label = format!(
+            "Track {}, prev: {} next: {}",
+            track.ids.own,
+            track.ids.prev.map(|x| x.to_string()).unwrap_or("-".to_string()),
+            track.ids.next.map(|x| x.to_string()).unwrap_or("-".to_string()),
+        );
 
-            let background_path = element::Path::new()
-                .set("d", data.clone())
-                .set("id", format!("track_bg_{}", track.ids.own))
-                .set("fill", "none")
-                .set("stroke", BG_COLOR)
-                .set("stroke-width", 12.0)
-                .set("stroke-linecap", "round");
+        let background_path = element::Path::new()
+            .set("d", data.clone())
+            .set("id", format!("track_bg_{}", track.ids.own))
+            .set("fill", "none")
+            .set("stroke", BG_COLOR)
+            .set("stroke-width", 12.0)
+            .set("stroke-linecap", "round");
 
-            let track_path = element::Path::new()
-                .set("id", format!("track_{}", track.ids.own))
-                .set("inkscape:label", label)
-                .set("d", data)
-                .set("fill", "none")
-                .set("stroke", highlight.unwrap_or(TRACK_COLOR))
-                .set("stroke-width", 0.5)
-                .set("stroke-linecap", "round");
+        let track_path = element::Path::new()
+            .set("id", format!("track_{}", track.ids.own))
+            .set("inkscape:label", label)
+            .set("d", data)
+            .set("fill", "none")
+            .set("stroke", highlight.unwrap_or(TRACK_COLOR))
+            .set("stroke-width", 0.5)
+            .set("stroke-linecap", "round");
 
-            map_elements.push(MapElement { y: track.shape.lowest_y() - 4.0, node: Box::new(background_path) });
-            map_elements.push(MapElement { y: track.shape.lowest_y(), node: Box::new(track_path) });
-        }
+        map_elements.push(MapElement { y: track.shape.lowest_y() - 4.0, node: Box::new(background_path) });
+        map_elements.push(MapElement { y: track.shape.lowest_y(), node: Box::new(track_path) });
 
-        let projected_start = project_vec(track.shape.start());
-        let projected_end = project_vec(track.shape.end());
+        let projected_start = project_pos(&track.shape.start().pos);
+        let projected_end = project_pos(&track.shape.end().pos);
         min_x = min_x.min(projected_start.x).min(projected_end.x);
         max_x = max_x.max(projected_start.x).max(projected_end.x);
         min_z = min_z.min(projected_start.y).min(projected_end.y);

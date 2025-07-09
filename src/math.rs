@@ -1,10 +1,11 @@
+use crate::parse::Checkpoint;
 use glam::{Mat3, Vec2, Vec3};
 use nalgebra::{Matrix2, SVD};
 
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct RotatedCircle {
     original_radius: f32,
-    rotation: Mat3,
+    start_rotation: Mat3,
     axes: EllipseAxes,
 }
 
@@ -40,7 +41,7 @@ impl RotatedCircle {
     pub(crate) fn new(original_radius: f32, rotation: Mat3) -> Self {
         Self {
             original_radius,
-            rotation,
+            start_rotation: rotation,
             axes: get_projected_ellipse_axes(original_radius, rotation),
         }
     }
@@ -49,19 +50,24 @@ impl RotatedCircle {
         self.original_radius
     }
 
-    fn angle_rotation(&self, angle: f32) -> Mat3 {
+    /// Returns the matrix for the rotation transformation from moving by the angle along the curve.
+    /// Does not include `self.rotation`.
+    fn inner_rotation(&self, angle: f32) -> Mat3 {
         Mat3::from_rotation_y(-angle * self.original_radius.signum())
     }
 
-    pub(crate) fn end_vec(&self, angle: f32) -> Vec3 {
-        let vec_rotation = self.rotation * self.angle_rotation(angle);
-        vec_rotation * Vec3::Z
+    pub(crate) fn start_rotation(&self) -> Mat3 {
+        self.start_rotation
     }
 
-    pub(crate) fn move_by_angle(&self, start: Vec3, angle: f32) -> Vec3 {
+    pub(crate) fn move_by_angle(&self, start: Vec3, angle: f32) -> Checkpoint {
         let radius_vec = self.original_radius * Vec3::X;
-        let start_to_end = -radius_vec + self.angle_rotation(angle) * radius_vec;
-        start + self.rotation * start_to_end
+        let inner_rotation = self.inner_rotation(angle);
+        let start_to_end = -radius_vec + inner_rotation * radius_vec;
+        Checkpoint {
+            pos: start + self.start_rotation * start_to_end,
+            rotation: self.start_rotation * inner_rotation,
+        }
     }
 }
 
@@ -77,6 +83,6 @@ pub(crate) fn project_circle(circle: &RotatedCircle) -> EllipseAxes {
     }
 }
 
-pub(crate) fn project_vec(vec: &Vec3) -> Vec2 {
+pub(crate) fn project_pos(vec: &Vec3) -> Vec2 {
     transform(Vec2::new(vec.x, vec.z))
 }
