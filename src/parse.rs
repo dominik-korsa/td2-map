@@ -2,6 +2,7 @@ use crate::math::RotatedCircle;
 use crate::track_structures::{Crossing, ForkSwitch, SlipSwitch, TrackStructure, TRACK_STRUCTURES};
 use anyhow::{bail, ensure};
 use glam::{Mat3, Vec3};
+use lazy_regex::regex_captures;
 use std::io::{BufRead, BufReader, Read};
 
 #[derive(Debug)]
@@ -11,7 +12,7 @@ enum State {
     TerrainGroup,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum TrackShape {
     Straight {
         start: Vec3,
@@ -28,11 +29,6 @@ pub(crate) enum TrackShape {
         control2: Vec3,
         end: Vec3,
     },
-}
-
-#[derive(Debug)]
-pub(crate) struct SwitchShape {
-    pub(crate) track_shapes: Vec<TrackShape>,
 }
 
 impl TrackShape {
@@ -57,16 +53,43 @@ impl TrackShape {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
+pub struct TrackIds {
+    pub own: i32,
+    pub(crate) prev: Option<i32>,
+    pub(crate) next: Option<i32>,
+}
+
+impl TrackIds {
+    #[deprecated(note = "Temporary solution")]
+    pub(crate) fn just_own(own: i32) -> Self {
+        TrackIds {
+            own,
+            prev: None,
+            next: None,
+        }
+    }
+
+    #[deprecated(note = "Temporary solution")]
+    pub(crate) fn placeholder() -> Self {
+        TrackIds {
+            own: -1,
+            prev: None,
+            next: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Track {
-    pub id: i32,
+    pub ids: TrackIds,
     pub(crate) shape: TrackShape,
 }
 
 #[derive(Debug)]
 pub struct Switch {
     pub id: i32,
-    pub(crate) shape: SwitchShape,
+    pub(crate) tracks: Vec<Track>,
 }
 
 #[derive(Debug)]
@@ -119,7 +142,7 @@ fn parse_normal_track(cells: &[&str]) -> anyhow::Result<Track> {
     };
 
     Ok(Track {
-        id: cells[1].parse()?,
+        ids: TrackIds::just_own(cells[1].parse()?),
         shape,
     })
 }
@@ -134,7 +157,7 @@ fn parse_bezier_track(cells: &[&str]) -> anyhow::Result<Track> {
     let rotation = Mat3::IDENTITY;
 
     Ok(Track {
-        id: cells[1].parse()?,
+        ids: TrackIds::just_own(cells[1].parse()?),
         shape: TrackShape::Bezier {
             start,
             control1: start + rotation * start_to_control1,
@@ -160,52 +183,67 @@ fn build_fork_half(
     radius: f32,
     curve_length: f32,
     added_length: f32,
-) -> Vec<TrackShape> {
+) -> (TrackShape, TrackShape) {
     if radius == 0.0 {
-        return vec![TrackShape::Straight {
-            start,
-            end: start + rotation * (curve_length + added_length) * Vec3::Z,
-        }];
+        let first_end = start + rotation * curve_length * Vec3::Z;
+        return (
+            TrackShape::Straight {
+                start,
+                end: first_end,
+            },
+            TrackShape::Straight {
+                start: first_end,
+                end: first_end + rotation * added_length * Vec3::Z,
+            },
+        );
     }
 
     let angle = curve_length / radius.abs();
     let circle = RotatedCircle::new(radius, rotation);
     let circle_end = circle.move_by_angle(start, angle);
 
-    let mut track_shapes: Vec<TrackShape> = vec![
+    let extra_vec = added_length * circle.end_vec(angle);
+    let extra_straight_end = circle_end + extra_vec;
 
-    ];
-    if added_length > 0.0 {
-        let extra_vec = added_length * circle.end_vec(angle);
-        let extra_straight_end = circle_end + extra_vec;
-        track_shapes.push(TrackShape::Straight {
+    (
+        TrackShape::Arc {
+            start,
+            end: circle_end,
+            rotated_circle: circle,
+        },
+        TrackShape::Straight {
             start: circle_end,
             end: extra_straight_end,
-        });
-    }
-
-    track_shapes.push(TrackShape::Arc {
-        start,
-        end: circle_end,
-        rotated_circle: circle,
-    });
-
-    track_shapes
+        },
+    )
 }
 
 fn build_fork_switch(
     start: Vec3,
     rotation: Mat3,
     fork: &ForkSwitch,
-) -> Vec<TrackShape> {
-    let mut left = build_fork_half(start, rotation, fork.radius_left, fork.curve_length, fork.added_length);
-    let right = build_fork_half(start, rotation, fork.radius_right, fork.curve_length, fork.added_length);
-    left.extend(right);
-    left
+) -> anyhow::Result<Vec<Track>> {
+    let (left_main, left_extra) = build_fork_half(start, rotation, fork.radius_left, fork.curve_length, fork.added_length);
+    let (right_main, right_extra) = build_fork_half(start, rotation, fork.radius_right, fork.curve_length, fork.added_length);
+
+    let track_shapes = vec![
+        TrackShape::Straight {
+            start,
+            end: start,
+        },
+        left_main,
+        right_main,
+        left_extra,
+        right_extra,
+    ];
+    Ok(track_shapes.into_iter().map(|shape| Track {
+        shape,
+        ids: TrackIds::placeholder(),
+    }).collect())
 }
 
-fn build_slip_switch(start: Vec3, rotation: Mat3, slip: &SlipSwitch) -> Vec<TrackShape> {
-    let half_angle = (1.0 / slip.tangent / 2.0).atan();
+fn build_slip_switch(start: Vec3, rotation: Mat3, slip: &SlipSwitch) -> anyhow::Result<Vec<Track>> {
+    let half_angle = (1.0 / slip.tangent).atan() / 2.0;
     let in_half_length = slip.radius * half_angle;
     let out_half_length = slip.length / 2.0;
 
@@ -267,31 +305,68 @@ fn build_slip_switch(start: Vec3, rotation: Mat3, slip: &SlipSwitch) -> Vec<Trac
         end: point_d_in,
     });
 
-    track_shapes
+    Ok(track_shapes.into_iter().map(|shape| Track {
+        shape,
+        ids: TrackIds::placeholder(),
+    }).collect())
 }
 
-fn build_crossing(start: Vec3, rotation: Mat3, crossing: &Crossing) -> Vec<TrackShape> {
+fn build_crossing(start: Vec3, rotation: Mat3, crossing: &Crossing, subtracks: Vec<TrackIds>) -> anyhow::Result<Vec<Track>> {
+    ensure!(subtracks.len() == 2, "Crossing must have exactly two subtacks");
+
     let half_angle = (1.0 / crossing.tangent).atan() / 2.0;
     let half_length = crossing.length / 2.0;
 
-    let unit_vec_left = Mat3::from_rotation_y(-half_angle) * Vec3::Z;
-    let unit_vec_right = Mat3::from_rotation_y(half_angle) * Vec3::Z;
+    let unit_vec_ac = Mat3::from_rotation_y(half_angle) * Vec3::Z;
+    let unit_vec_bd = Mat3::from_rotation_y(-half_angle) * Vec3::Z;
 
-    let point_a = start + rotation * half_length * unit_vec_left;
-    let point_b = start + rotation * half_length * unit_vec_right;
-    let point_c = start + rotation * (half_length * -unit_vec_left);
-    let point_d = start + rotation * (half_length * -unit_vec_right);
+    let point_a = start + rotation * half_length * -unit_vec_ac;
+    let point_b = start + rotation * half_length * -unit_vec_bd;
+    let point_c = start + rotation * (half_length * unit_vec_ac);
+    let point_d = start + rotation * (half_length * unit_vec_bd);
 
-    vec![
-        TrackShape::Straight {
-            start: point_a,
-            end: point_c,
+    let shape_ac = TrackShape::Straight {
+        start: point_b,
+        end: point_d,
+    };
+    let shape_bd = TrackShape::Straight {
+        start: point_a,
+        end: point_c,
+    };
+
+    Ok(vec![
+        Track {
+            ids: subtracks[0],
+            shape: shape_bd,
         },
-        TrackShape::Straight {
-            start: point_b,
-            end: point_d,
+        Track {
+            ids: subtracks[1],
+            shape: shape_ac,
         },
-    ]
+    ])
+}
+
+fn parse_subtrack_ids(cell: &str) -> anyhow::Result<Vec<TrackIds>> {
+    let ids = cell.split(',')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            if let Some((_, own, prev, next)) = regex_captures!(r"^(\d+):(\d*):(\d*)$", part) {
+                let own: i32 = own.parse()?;
+                let prev = if prev.is_empty() { None } else { Some(prev.parse()?) };
+                let next = if next.is_empty() { None } else { Some(next.parse()?) };
+                Ok(TrackIds { own, prev, next })
+            } else if let Ok(own) = part.parse::<i32>() {
+                Ok(TrackIds {
+                    own,
+                    prev: None,
+                    next: None,
+                })
+            } else {
+                bail!("Invalid subtrack ID format: {part}");
+            }
+        })
+        .collect::<anyhow::Result<_>>()?;
+    Ok(ids)
 }
 
 fn parse_track_structure(cells: &[&str]) -> anyhow::Result<Switch> {
@@ -300,26 +375,25 @@ fn parse_track_structure(cells: &[&str]) -> anyhow::Result<Switch> {
     let start = parse_position(&cells[3..6])?;
     let rotation = parse_transform(&cells[6..9])?;
 
-    let mut track_shapes: Vec<TrackShape> = vec![];
-
     let Some(structure_name) = cells[2].split(',').next() else {
         bail!("Track structure name is missing");
     };
 
-    if let Some(track_structure) = TRACK_STRUCTURES.get(structure_name) {
-        let shapes = match track_structure {
-            TrackStructure::Fork(fork) => build_fork_switch(start, rotation, fork),
-            TrackStructure::Slip(slip) => build_slip_switch(start, rotation, slip),
-            TrackStructure::Crossing(crossing) => build_crossing(start, rotation, crossing),
-        };
-        track_shapes.extend(shapes);
+    let subtracks = parse_subtrack_ids(cells[9])?;
+
+    let tracks: Vec<Track> = if let Some(track_structure) = TRACK_STRUCTURES.get(structure_name) {
+        match track_structure {
+            TrackStructure::Fork(fork) => build_fork_switch(start, rotation, fork)?,
+            TrackStructure::Slip(slip) => build_slip_switch(start, rotation, slip)?,
+            TrackStructure::Crossing(crossing) => build_crossing(start, rotation, crossing, subtracks)?,
+        }
     } else {
         bail!("Unknown switch type {structure_name}");
-    }
+    };
 
     Ok(Switch {
         id,
-        shape: SwitchShape { track_shapes },
+        tracks,
     })
 }
 

@@ -1,5 +1,5 @@
 use crate::math::{project_circle, project_vec};
-use crate::parse::{ParseResult, TrackShape};
+use crate::parse::{ParseResult, Track, TrackShape};
 use std::fs;
 use std::path::Path;
 use svg::node::element;
@@ -71,44 +71,57 @@ pub fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyhow::Res
     let mut min_z: f32 = f32::MAX;
     let mut max_z: f32 = f32::MIN;
 
-    let mut add_track = |shape: &TrackShape, id: &str, highlight: Option<&str>| {
-        let data = path_data(shape);
+    let mut add_track = |track: &Track, highlight: Option<&str>| {
+        if track.shape.start() != track.shape.end() || true { // TODO: Remove || true
+            let data = path_data(&track.shape);
 
-        let background_path = element::Path::new()
-            .set("d", data.clone())
-            .set("id", id)
-            .set("fill", "none")
-            .set("stroke", BG_COLOR)
-            .set("stroke-width", 12.0)
-            .set("stroke-linecap", "round");
+            let label = format!(
+                "Track {}, prev: {} next: {}",
+                track.ids.own,
+                track.ids.prev.map(|x| x.to_string()).unwrap_or("-".to_string()),
+                track.ids.next.map(|x| x.to_string()).unwrap_or("-".to_string()),
+            );
 
-        let track_path = element::Path::new()
-            .set("id", format!("bg_{id}"))
-            .set("d", data)
-            .set("fill", "none")
-            .set("stroke", highlight.unwrap_or(TRACK_COLOR))
-            .set("stroke-width", 0.5)
-            .set("stroke-linecap", "round");
+            let background_path = element::Path::new()
+                .set("d", data.clone())
+                .set("id", format!("track_bg_{}", track.ids.own))
+                .set("fill", "none")
+                .set("stroke", BG_COLOR)
+                .set("stroke-width", 12.0)
+                .set("stroke-linecap", "round");
 
-        map_elements.push(MapElement { y: shape.lowest_y() - 4.0, node: Box::new(background_path) });
-        map_elements.push(MapElement { y: shape.lowest_y(), node: Box::new(track_path) });
+            let track_path = element::Path::new()
+                .set("id", format!("track_{}", track.ids.own))
+                .set("inkscape:label", label)
+                .set("d", data)
+                .set("fill", "none")
+                .set("stroke", highlight.unwrap_or(TRACK_COLOR))
+                .set("stroke-width", 0.5)
+                .set("stroke-linecap", "round");
 
-        let projected_start = project_vec(shape.start());
-        let projected_end = project_vec(shape.end());
+            map_elements.push(MapElement { y: track.shape.lowest_y() - 4.0, node: Box::new(background_path) });
+            map_elements.push(MapElement { y: track.shape.lowest_y(), node: Box::new(track_path) });
+        }
+
+        let projected_start = project_vec(track.shape.start());
+        let projected_end = project_vec(track.shape.end());
         min_x = min_x.min(projected_start.x).min(projected_end.x);
         max_x = max_x.max(projected_start.x).max(projected_end.x);
         min_z = min_z.min(projected_start.y).min(projected_end.y);
         max_z = max_z.max(projected_start.y).max(projected_end.y);
     };
 
-    for track in &parse_result.tracks {
-        add_track(&track.shape, &format!("track_{}", track.id), None);
-    }
+    let mut tracks = parse_result.tracks.clone();
 
     for switch in &parse_result.switches {
-        for (index, track_shape) in switch.shape.track_shapes.iter().enumerate() {
-            add_track(track_shape, &format!("switch_track_{}_{}", switch.id, index), Some("magenta"));
-        }
+        tracks.extend(switch.tracks.clone());
+        // for (index, track_shape) in switch.shape.track_shapes.iter().enumerate() {
+            // add_track(track_shape, &format!("switch_track_{}_{}", switch.id, index), Some("magenta"));
+        // }
+    }
+
+    for track in &tracks {
+        add_track(&track, None);
     }
 
     let min_x = min_x as i64 - 100;

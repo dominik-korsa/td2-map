@@ -1,14 +1,14 @@
 use glam::{Mat3, Vec2, Vec3};
 use nalgebra::{Matrix2, SVD};
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub(crate) struct RotatedCircle {
     original_radius: f32,
     rotation: Mat3,
     axes: EllipseAxes,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub(crate) struct EllipseAxes {
     pub(crate) major_axis: Vec2,
     pub(crate) minor_axis: Vec2,
