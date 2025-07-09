@@ -273,64 +273,64 @@ fn build_fork_switch(
     structure_name: &str,
 ) -> anyhow::Result<Vec<Track>> {
     ensure!(subtracks.len() >= 5, "Fork switch must have at least 5 subtracks");
-    let [start_id, left_curve_id, right_curve_id] = subtracks[0..3] else {
+    let [start_id, first_curve_id, second_curve_id] = subtracks[0..3] else {
         panic!("Failed to match subtrack IDs");
     };
-    let (left_end_id, right_end_id, extra_ids) = if fork.added_length > 0.0 {
+    let (first_end_id, second_end_id, extra_ids) = if fork.added_length > 0.0 {
         ensure!(subtracks.len() == 7, "Fork switch with added length must have exactly 7 subtracks");
-        let [left_extra_id, right_extra_id, left_end_id, right_end_id] = subtracks[3..7] else {
+        let [first_extra_id, second_extra_id, first_end_id, second_end_id] = subtracks[3..7] else {
             panic!("Failed to match subtrack IDs");
         };
-        (left_end_id, right_end_id, Some((left_extra_id, right_extra_id)))
+        (first_end_id, second_end_id, Some((first_extra_id, second_extra_id)))
     } else {
         ensure!(subtracks.len() == 5, "Fork switch without added length must have exactly 5 subtracks");
-        let [right_end_id, left_end_id] = subtracks[3..5] else {
+        let [second_end_id, first_end_id] = subtracks[3..5] else {
             panic!("Failed to match subtrack IDs");
         };
-        (left_end_id, right_end_id, None)
+        (first_end_id, second_end_id, None)
     };
 
-    let (left_after_curve_id, right_after_curve_id) = if let Some((left_extra_id, right_extra_id)) = extra_ids {
-        (left_extra_id.own, right_extra_id.own)
+    let (first_after_curve_id, second_after_curve_id) = if let Some((first_extra_id, second_extra_id)) = extra_ids {
+        (first_extra_id.own, second_extra_id.own)
     } else {
-        (left_end_id.own, right_end_id.own)
+        (first_end_id.own, second_end_id.own)
     };
 
     let start_shape = TrackShape::point(start);
 
-    let left_curve_shape = TrackShape::arc_or_straight(start, fork.radius_left, fork.curve_length);
-    let mut left_current_end = left_curve_shape.end();
-    let mut left_current_end_id = left_curve_id.own;
+    let first_curve_shape = TrackShape::arc_or_straight(start, fork.radius_1, fork.curve_length);
+    let mut first_current_end = first_curve_shape.end();
+    let mut first_current_end_id = first_curve_id.own;
 
-    let right_curve_shape = TrackShape::arc_or_straight(start, fork.radius_right, fork.curve_length);
-    let mut right_current_end = right_curve_shape.end();
-    let mut right_current_end_id = right_curve_id.own;
+    let second_curve_shape = TrackShape::arc_or_straight(start, fork.radius_2, fork.curve_length);
+    let mut second_current_end = second_curve_shape.end();
+    let mut second_current_end_id = second_curve_id.own;
 
     let mut tracks: Vec<Track> = vec![
         Track::new(start_id, start_shape),
-        Track::new(left_curve_id.with_prev(start_id.own).with_next(left_after_curve_id), left_curve_shape),
-        Track::new(right_curve_id.with_prev(start_id.own).with_next(right_after_curve_id), right_curve_shape),
+        Track::new(first_curve_id.with_prev(start_id.own).with_next(first_after_curve_id), first_curve_shape),
+        Track::new(second_curve_id.with_prev(start_id.own).with_next(second_after_curve_id), second_curve_shape),
     ];
 
-    if let Some((left_extra_id, right_extra_id)) = extra_ids {
-        let left_extra_shape = TrackShape::straight(left_current_end, fork.added_length);
-        let right_extra_shape = TrackShape::straight(right_current_end, fork.added_length);
+    if let Some((first_extra_id, second_extra_id)) = extra_ids {
+        let first_extra_shape = TrackShape::straight(first_current_end, fork.added_length);
+        let second_extra_shape = TrackShape::straight(second_current_end, fork.added_length);
 
-        left_current_end = left_extra_shape.end();
-        right_current_end = right_extra_shape.end();
+        first_current_end = first_extra_shape.end();
+        second_current_end = second_extra_shape.end();
 
-        tracks.push(Track::new(left_extra_id.with_prev(left_current_end_id).with_next(left_end_id.own), left_extra_shape));
-        tracks.push(Track::new(right_extra_id.with_prev(right_current_end_id).with_next(right_end_id.own), right_extra_shape));
+        tracks.push(Track::new(first_extra_id.with_prev(first_current_end_id).with_next(first_end_id.own), first_extra_shape));
+        tracks.push(Track::new(second_extra_id.with_prev(second_current_end_id).with_next(second_end_id.own), second_extra_shape));
 
-        left_current_end_id = left_extra_id.own;
-        right_current_end_id = right_extra_id.own;
+        first_current_end_id = first_extra_id.own;
+        second_current_end_id = second_extra_id.own;
     }
 
     tracks.push(
-        Track::new_structure_end(left_end_id.with_prev(left_current_end_id), TrackShape::point(left_current_end), structure_name.to_string()),
+        Track::new_structure_end(first_end_id.with_prev(first_current_end_id), TrackShape::point(first_current_end), structure_name.to_string()),
     );
     tracks.push(
-        Track::new_structure_end(right_end_id.with_prev(right_current_end_id), TrackShape::point(right_current_end), structure_name.to_string()),
+        Track::new_structure_end(second_end_id.with_prev(second_current_end_id), TrackShape::point(second_current_end), structure_name.to_string()),
     );
 
     Ok(tracks)
