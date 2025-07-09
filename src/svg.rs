@@ -81,10 +81,11 @@ pub fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyhow::Res
         let data = path_data(&track.shape);
 
         let label = format!(
-            "Track {}, prev: {} next: {}",
+            "Track {}, prev: {}, next: {}.\nShape: {:?}",
             track.ids.own,
             track.ids.prev.map(|x| x.to_string()).unwrap_or("-".to_string()),
             track.ids.next.map(|x| x.to_string()).unwrap_or("-".to_string()),
+            track.shape,
         );
 
         let background_path = element::Path::new()
@@ -92,20 +93,31 @@ pub fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyhow::Res
             .set("id", format!("track_bg_{}", track.ids.own))
             .set("fill", "none")
             .set("stroke", BG_COLOR)
-            .set("stroke-width", 12.0)
+            .set("stroke-width", 8.0)
             .set("stroke-linecap", "round");
 
         let track_path = element::Path::new()
             .set("id", format!("track_{}", track.ids.own))
+            .set("inkscape:label", label.clone())
+            .set("d", data.clone())
+            .set("fill", "none")
+            .set("stroke", highlight.unwrap_or(TRACK_COLOR))
+            .set("stroke-width", 1.2)
+            .set("stroke-linecap", "round");
+
+        let track_inner_path = element::Path::new()
+            .set("id", format!("track_inner_{}", track.ids.own))
             .set("inkscape:label", label)
             .set("d", data)
             .set("fill", "none")
-            .set("stroke", highlight.unwrap_or(TRACK_COLOR))
-            .set("stroke-width", 0.5)
-            .set("stroke-linecap", "round");
+            .set("stroke", "#000")
+            .set("stroke-width", 0.3)
+            .set("stroke-linecap", "butt")
+            .set("stroke-dasharray", "0.5, 0.5");
 
         map_elements.push(MapElement { y: track.shape.lowest_y() - 4.0, node: Box::new(background_path) });
         map_elements.push(MapElement { y: track.shape.lowest_y(), node: Box::new(track_path) });
+        map_elements.push(MapElement { y: track.shape.lowest_y() + 1.0, node: Box::new(track_inner_path) });
 
         let projected_start = project_pos(&track.shape.start().pos);
         let projected_end = project_pos(&track.shape.end().pos);

@@ -140,18 +140,16 @@ impl TrackIds {
         self.next = Some(id);
         self
     }
+
+    pub(crate) fn parse(own: &str, prev: &str, next: &str) -> anyhow::Result<Self> {
+        let own = own.parse()?;
+        let prev = if prev.is_empty() { None } else { Some(prev.parse()?) };
+        let next = if next.is_empty() { None } else { Some(next.parse()?) };
+        Ok(TrackIds { own, prev, next })
+    }
 }
 
 impl TrackIds {
-    #[deprecated(note = "Temporary solution")]
-    pub(crate) fn just_own(own: i32) -> Self {
-        TrackIds {
-            own,
-            prev: None,
-            next: None,
-        }
-    }
-
     #[deprecated(note = "Temporary solution")]
     pub(crate) fn placeholder() -> Self {
         TrackIds {
@@ -208,6 +206,8 @@ fn parse_transform(cells: &[&str]) -> anyhow::Result<Mat3> {
 
 fn parse_normal_track(cells: &[&str]) -> anyhow::Result<Track> {
     ensure!(cells.len() >= 22);
+    let ids = TrackIds::parse(cells[1], cells[12], cells[11])?;
+
     let start = Checkpoint::new(
         parse_position(&cells[3..6])?,
         parse_transform(&cells[6..9])?,
@@ -218,13 +218,16 @@ fn parse_normal_track(cells: &[&str]) -> anyhow::Result<Track> {
     let shape = TrackShape::arc_or_straight(start, radius, length);
 
     Ok(Track {
-        ids: TrackIds::just_own(cells[1].parse()?),
+        ids,
         shape,
     })
 }
 
 fn parse_bezier_track(cells: &[&str]) -> anyhow::Result<Track> {
     ensure!(cells.len() >= 18);
+
+    let ids = TrackIds::parse(cells[1], cells[16], cells[15])?;
+
     let start_pos = parse_position(&cells[3..6])?;
     let start_to_control1 = parse_position(&cells[6..9])?;
     let start_to_end = parse_position(&cells[9..12])? - start_pos;
@@ -233,7 +236,7 @@ fn parse_bezier_track(cells: &[&str]) -> anyhow::Result<Track> {
     let rotation = Mat3::IDENTITY;
 
     Ok(Track {
-        ids: TrackIds::just_own(cells[1].parse()?),
+        ids,
         shape: TrackShape::Bezier {
             start_pos,
             control1: start_pos + rotation * start_to_control1,
@@ -259,12 +262,12 @@ fn build_fork_switch(
     subtracks: Vec<TrackIds>,
 ) -> anyhow::Result<Vec<Track>> {
     ensure!(subtracks.len() >= 5, "Fork switch must have at least 5 subtracks");
-    let [start_id, right_curve_id, left_curve_id] = subtracks[0..3] else {
+    let [start_id, left_curve_id, right_curve_id] = subtracks[0..3] else {
         panic!("Failed to match subtrack IDs");
     };
     let (left_end_id, right_end_id, extra_ids) = if fork.added_length > 0.0 {
         ensure!(subtracks.len() == 7, "Fork switch with added length must have exactly 7 subtracks");
-        let [right_extra_id, left_extra_id, right_end_id, left_end_id] = subtracks[3..7] else {
+        let [left_extra_id, right_extra_id, left_end_id, right_end_id] = subtracks[3..7] else {
             panic!("Failed to match subtrack IDs");
         };
         (left_end_id, right_end_id, Some((left_extra_id, right_extra_id)))
@@ -422,16 +425,7 @@ fn parse_subtrack_ids(cell: &str) -> anyhow::Result<Vec<TrackIds>> {
         .filter(|part| !part.is_empty())
         .map(|part| {
             if let Some((_, own, prev, next)) = regex_captures!(r"^(\d+):(\d*):(\d*)$", part) {
-                let own: i32 = own.parse()?;
-                let prev = if prev.is_empty() { None } else { Some(prev.parse()?) };
-                let next = if next.is_empty() { None } else { Some(next.parse()?) };
-                Ok(TrackIds { own, prev, next })
-            } else if let Ok(own) = part.parse::<i32>() {
-                Ok(TrackIds {
-                    own,
-                    prev: None,
-                    next: None,
-                })
+                TrackIds::parse(own, prev, next)
             } else {
                 bail!("Invalid subtrack ID format: {part}");
             }
