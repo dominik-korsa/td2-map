@@ -9,7 +9,11 @@ use svg::{Document, Node};
 
 fn path_data(track_shape: &TrackShape) -> Data {
     match track_shape {
-        TrackShape::Straight { start, end_pos: end, .. } => {
+        TrackShape::Straight {
+            start,
+            end_pos: end,
+            ..
+        } => {
             let projected_start = project_pos(&start.pos);
             let projected_end = project_pos(end);
 
@@ -18,7 +22,12 @@ fn path_data(track_shape: &TrackShape) -> Data {
                 .line_to((projected_end.x, projected_end.y));
             data
         }
-        TrackShape::Arc { start_pos, end, rotated_circle, .. } => {
+        TrackShape::Arc {
+            start_pos,
+            end,
+            rotated_circle,
+            ..
+        } => {
             let projected_start = project_pos(start_pos);
             let projected_end = project_pos(&end.pos);
             let projected_circle = project_circle(&rotated_circle);
@@ -30,12 +39,22 @@ fn path_data(track_shape: &TrackShape) -> Data {
                     projected_circle.minor_axis.length(),
                     projected_circle.major_axis.to_angle(),
                     0, // large arc flag off
-                    if rotated_circle.original_radius() > 0.0 { 0 } else { 1 },
-                    projected_end.x, projected_end.y,
+                    if rotated_circle.original_radius() > 0.0 {
+                        0
+                    } else {
+                        1
+                    },
+                    projected_end.x,
+                    projected_end.y,
                 ));
             data
         }
-        TrackShape::Bezier { start_pos: start, control1, control2, end_pos: end } => {
+        TrackShape::Bezier {
+            start_pos: start,
+            control1,
+            control2,
+            end_pos: end,
+        } => {
             let projected_start = project_pos(start);
             let projected_control1 = project_pos(control1);
             let projected_control2 = project_pos(control2);
@@ -44,9 +63,12 @@ fn path_data(track_shape: &TrackShape) -> Data {
             let data = Data::new()
                 .move_to((projected_start.x, projected_start.y))
                 .cubic_curve_to((
-                    projected_control1.x, projected_control1.y,
-                    projected_control2.x, projected_control2.y,
-                    projected_end.x, projected_end.y,
+                    projected_control1.x,
+                    projected_control1.y,
+                    projected_control2.x,
+                    projected_control2.y,
+                    projected_end.x,
+                    projected_end.y,
                 ));
             data
         }
@@ -83,8 +105,16 @@ pub fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyhow::Res
         let label = format!(
             "Track {}, prev: {}, next: {}.\nShape: {:?}",
             track.ids.own,
-            track.ids.prev.map(|x| x.to_string()).unwrap_or("-".to_string()),
-            track.ids.next.map(|x| x.to_string()).unwrap_or("-".to_string()),
+            track
+                .ids
+                .prev
+                .map(|x| x.to_string())
+                .unwrap_or("-".to_string()),
+            track
+                .ids
+                .next
+                .map(|x| x.to_string())
+                .unwrap_or("-".to_string()),
             track.shape,
         );
 
@@ -115,9 +145,18 @@ pub fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyhow::Res
             .set("stroke-linecap", "butt")
             .set("stroke-dasharray", "0.5, 0.5");
 
-        map_elements.push(MapElement { y: track.shape.lowest_y() - 4.0, node: Box::new(background_path) });
-        map_elements.push(MapElement { y: track.shape.lowest_y(), node: Box::new(track_path) });
-        map_elements.push(MapElement { y: track.shape.lowest_y() + 1.0, node: Box::new(track_inner_path) });
+        map_elements.push(MapElement {
+            y: track.shape.lowest_y() - 4.0,
+            node: Box::new(background_path),
+        });
+        map_elements.push(MapElement {
+            y: track.shape.lowest_y(),
+            node: Box::new(track_path),
+        });
+        map_elements.push(MapElement {
+            y: track.shape.lowest_y() + 1.0,
+            node: Box::new(track_inner_path),
+        });
 
         let projected_start = project_pos(&track.shape.start().pos);
         let projected_end = project_pos(&track.shape.end().pos);
@@ -127,16 +166,7 @@ pub fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyhow::Res
         max_z = max_z.max(projected_start.y).max(projected_end.y);
     };
 
-    let mut tracks = parse_result.tracks.clone();
-
-    for switch in &parse_result.switches {
-        tracks.extend(switch.tracks.clone());
-        // for (index, track_shape) in switch.shape.track_shapes.iter().enumerate() {
-            // add_track(track_shape, &format!("switch_track_{}_{}", switch.id, index), Some("magenta"));
-        // }
-    }
-
-    for track in &tracks {
+    for track in &parse_result.tracks {
         add_track(&track, None);
     }
 
@@ -153,13 +183,36 @@ pub fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyhow::Res
                 .set("y", min_z)
                 .set("width", max_x - min_x)
                 .set("height", max_z - min_z)
-                .set("fill", BG_COLOR)
+                .set("fill", BG_COLOR),
         );
 
     map_elements.sort_by_key(|x| x.y as i64);
 
     for element in map_elements {
         document = document.add(element.node)
+    }
+
+    for failed_connection in &parse_result.failed_connections {
+        let start = project_pos(&failed_connection.pos1);
+        let end = project_pos(&failed_connection.pos2);
+        let data = Data::new()
+            .move_to((start.x, start.y))
+            .line_to((end.x, end.y));
+
+        let failed_path = element::Path::new()
+            .set(
+                "inkscape:label",
+                format!(
+                    "Failed connection from {} to {}",
+                    failed_connection.track1.ids.own, failed_connection.track2.ids.own
+                ),
+            )
+            .set("d", data)
+            .set("fill", "none")
+            .set("stroke", "#f00")
+            .set("stroke-width", 1.0);
+
+        document = document.add(failed_path);
     }
 
     if let Some(dir) = output_path.parent() {

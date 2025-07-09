@@ -1,9 +1,11 @@
 use crate::math::RotatedCircle;
 use crate::track_structures::{Crossing, ForkSwitch, SlipSwitch, TrackStructure, TRACK_STRUCTURES};
 use anyhow::{bail, ensure};
-use glam::{Mat3, Vec3};
+use glam::{Mat3, Vec3, Vec3Swizzles};
 use lazy_regex::regex_captures;
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read};
+use std::mem::swap;
 
 #[derive(Debug)]
 enum State {
@@ -164,11 +166,16 @@ impl TrackIds {
 pub struct Track {
     pub ids: TrackIds,
     pub(crate) shape: TrackShape,
+    pub(crate) end_for_structure: Option<String>,
 }
 
 impl Track {
     pub(crate) fn new(ids: TrackIds, shape: TrackShape) -> Self {
-        Track { ids, shape }
+        Track { ids, shape, end_for_structure: None }
+    }
+
+    pub(crate) fn new_structure_end(ids: TrackIds, shape: TrackShape, end_for_structure: String) -> Self {
+        Track { ids, shape, end_for_structure: Some(end_for_structure) }
     }
 }
 
@@ -179,9 +186,18 @@ pub struct Switch {
 }
 
 #[derive(Debug)]
+pub struct FailedConnection {
+    pub pos1: Vec3,
+    pub pos2: Vec3,
+    pub track1: Track,
+    pub track2: Track,
+}
+
+#[derive(Debug)]
 pub struct ParseResult {
     pub tracks: Vec<Track>,
-    pub switches: Vec<Switch>,
+    pub track_indexes: HashMap<i32, usize>,
+    pub failed_connections: Vec<FailedConnection>,
 }
 
 fn parse_position(cells: &[&str]) -> anyhow::Result<Vec3> {
@@ -216,11 +232,7 @@ fn parse_normal_track(cells: &[&str]) -> anyhow::Result<Track> {
     let radius: f32 = cells[10].parse()?;
 
     let shape = TrackShape::arc_or_straight(start, radius, length);
-
-    Ok(Track {
-        ids,
-        shape,
-    })
+    Ok(Track::new(ids, shape))
 }
 
 fn parse_bezier_track(cells: &[&str]) -> anyhow::Result<Track> {
@@ -235,15 +247,13 @@ fn parse_bezier_track(cells: &[&str]) -> anyhow::Result<Track> {
     let start_to_control2 = start_to_end + end_to_control2;
     let rotation = Mat3::IDENTITY;
 
-    Ok(Track {
-        ids,
-        shape: TrackShape::Bezier {
-            start_pos,
-            control1: start_pos + rotation * start_to_control1,
-            control2: start_pos + rotation * start_to_control2,
-            end_pos: start_pos + rotation * start_to_end,
-        },
-    })
+    let shape = TrackShape::Bezier {
+        start_pos,
+        control1: start_pos + rotation * start_to_control1,
+        control2: start_pos + rotation * start_to_control2,
+        end_pos: start_pos + rotation * start_to_end,
+    };
+    Ok(Track::new(ids, shape))
 }
 
 // https://wiki.td2.info.pl/index.php?title=Scenery_format
@@ -260,6 +270,7 @@ fn build_fork_switch(
     start: Checkpoint,
     fork: &ForkSwitch,
     subtracks: Vec<TrackIds>,
+    structure_name: &str,
 ) -> anyhow::Result<Vec<Track>> {
     ensure!(subtracks.len() >= 5, "Fork switch must have at least 5 subtracks");
     let [start_id, left_curve_id, right_curve_id] = subtracks[0..3] else {
@@ -316,16 +327,16 @@ fn build_fork_switch(
     }
 
     tracks.push(
-        Track::new(left_end_id.with_prev(left_current_end_id), TrackShape::point(left_current_end)),
+        Track::new_structure_end(left_end_id.with_prev(left_current_end_id), TrackShape::point(left_current_end), structure_name.to_string()),
     );
     tracks.push(
-        Track::new(right_end_id.with_prev(right_current_end_id), TrackShape::point(right_current_end)),
+        Track::new_structure_end(right_end_id.with_prev(right_current_end_id), TrackShape::point(right_current_end), structure_name.to_string()),
     );
 
     Ok(tracks)
 }
 
-fn build_slip_switch(start: Checkpoint, slip: &SlipSwitch) -> anyhow::Result<Vec<Track>> {
+fn build_slip_switch(start: Checkpoint, slip: &SlipSwitch, structure_name: &str) -> anyhow::Result<Vec<Track>> {
     let half_angle = (1.0 / slip.tangent).atan() / 2.0;
     let in_half_length = slip.radius * half_angle;
     let out_half_length = slip.length / 2.0;
@@ -396,7 +407,7 @@ fn build_slip_switch(start: Checkpoint, slip: &SlipSwitch) -> anyhow::Result<Vec
     Ok(vec![])
 }
 
-fn build_crossing(start: Checkpoint, crossing: &Crossing, subtracks: Vec<TrackIds>) -> anyhow::Result<Vec<Track>> {
+fn build_crossing(start: Checkpoint, crossing: &Crossing, subtracks: Vec<TrackIds>, structure_name: &str) -> anyhow::Result<Vec<Track>> {
     ensure!(subtracks.len() == 2, "Crossing must have exactly two subtracks");
 
     let half_angle = (1.0 / crossing.tangent).atan() / 2.0;
@@ -415,8 +426,8 @@ fn build_crossing(start: Checkpoint, crossing: &Crossing, subtracks: Vec<TrackId
     let shape_ac = TrackShape::straight_around_point(ac_start, -half_length, half_length);
 
     Ok(vec![
-        Track::new(subtracks[0], shape_ac),
-        Track::new(subtracks[1], shape_bd),
+        Track::new_structure_end(subtracks[0], shape_ac, structure_name.to_string()),
+        Track::new_structure_end(subtracks[1], shape_bd, structure_name.to_string()),
     ])
 }
 
@@ -450,9 +461,9 @@ fn parse_track_structure(cells: &[&str]) -> anyhow::Result<Switch> {
 
     let tracks: Vec<Track> = if let Some(track_structure) = TRACK_STRUCTURES.get(structure_name) {
         match track_structure {
-            TrackStructure::Fork(fork) => build_fork_switch(start, fork, subtracks)?,
-            TrackStructure::Slip(slip) => build_slip_switch(start, slip)?,
-            TrackStructure::Crossing(crossing) => build_crossing(start, crossing, subtracks)?,
+            TrackStructure::Fork(fork) => build_fork_switch(start, fork, subtracks, structure_name)?,
+            TrackStructure::Slip(slip) => build_slip_switch(start, slip, structure_name)?,
+            TrackStructure::Crossing(crossing) => build_crossing(start, crossing, subtracks, structure_name)?,
         }
     } else {
         bail!("Unknown switch type {structure_name}");
@@ -464,11 +475,53 @@ fn parse_track_structure(cells: &[&str]) -> anyhow::Result<Switch> {
     })
 }
 
+fn find_failed_connections(tracks: &Vec<Track>, track_indexes: &HashMap<i32, usize>) -> Vec<FailedConnection> {
+    let mut failed_connections: Vec<FailedConnection> = vec![];
+
+    for track in tracks {
+        let mut check_neighbour = |id: Option<i32>, pos: Vec3| {
+            if let Some(other_index) = id.and_then(|id| track_indexes.get(&id)) {
+                let other = &tracks[*other_index];
+                let mut dist_min = (other.shape.start().pos, (other.shape.start().pos.xz() - pos.xz()).length_squared()) ;
+                let mut dist_max = (other.shape.end().pos, (other.shape.end().pos.xz() - pos.xz()).length_squared());
+                if dist_max.1 < dist_min.1 {
+                    swap(&mut dist_min, &mut dist_max);
+                }
+                let dist_squared = dist_min.1;
+                if dist_squared > 1.0 {
+                    failed_connections.push(FailedConnection {
+                        pos1: pos,
+                        pos2: dist_min.0,
+                        track1: track.clone(),
+                        track2: other.clone(),
+                    });
+                    let difference = dist_min.0 - pos;
+                    println!(
+                        "The tracks {} and {} don't align - their ends are at a distance of {}: (x: {}, y (ignored): {}, z: {})",
+                        track.ids.own,
+                        other.ids.own,
+                        dist_squared.sqrt(),
+                        difference.x,
+                        difference.y,
+                        difference.z,
+                    );
+                    if let Some(structure_name) = &track.end_for_structure {
+                        println!("Track {} is part of the track structure \"{}\"", track.ids.own, structure_name);
+                    }
+                }
+            }
+        };
+        check_neighbour(track.ids.prev, track.shape.start().pos);
+        check_neighbour(track.ids.next, track.shape.end().pos);
+    }
+
+    failed_connections
+}
+
 pub fn parse<R: Read>(input: R) -> anyhow::Result<ParseResult> {
     let lines = BufReader::new(input).lines();
 
     let mut tracks: Vec<Track> = vec![];
-    let mut switches: Vec<Switch> = vec![];
 
     let mut state = State::Default;
     lines.flatten().for_each(|line| {
@@ -488,11 +541,15 @@ pub fn parse<R: Read>(input: R) -> anyhow::Result<ParseResult> {
                     state = State::TerrainGroup;
                 }
                 "Track" => match parse_track(&cells) {
-                    Ok(track) => tracks.push(track),
+                    Ok(track) => {
+                        tracks.push(track);
+                    },
                     Err(e) => println!("Failed to parse track: {e}"),
                 },
                 "TrackStructure" => match parse_track_structure(&cells) {
-                    Ok(switch) => switches.push(switch),
+                    Ok(switch) => {
+                        tracks.extend(switch.tracks);
+                    },
                     Err(e) => println!("Failed to parse switch: {e}"),
                 },
                 "TrackObject" | "Misc" | "Fence" | "Wires" | "TerrainPoint" | "MiscGroup"
@@ -515,5 +572,15 @@ pub fn parse<R: Read>(input: R) -> anyhow::Result<ParseResult> {
         }
     });
 
-    Ok(ParseResult { tracks, switches })
+    let mut track_indexes: HashMap<i32, usize> = HashMap::new();
+    for (index, track) in tracks.iter().enumerate() {
+        let prev = track_indexes.insert(track.ids.own, index);
+        if prev.is_some() {
+            println!("Duplicate track ID found: {}", track.ids.own);
+        }
+    }
+
+    let failed_connections = find_failed_connections(&tracks, &track_indexes);
+
+    Ok(ParseResult { tracks, track_indexes, failed_connections })
 }
