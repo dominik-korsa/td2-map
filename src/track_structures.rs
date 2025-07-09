@@ -19,7 +19,9 @@ pub(crate) struct ForkSwitch {
 
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct SlipSwitch {
-    pub(crate) length: f32,
+    pub(crate) total_length: f32,
+    pub(crate) outer_length: f32,
+    pub(crate) transition_length: f32,
     pub(crate) radius: f32,
     pub(crate) tangent: f32,
     pub(crate) left_slip: bool,
@@ -139,31 +141,34 @@ fn try_parse_fork_switch(config: &HashMap<String, String>, is_right: bool) -> Op
     })
 }
 
-fn try_parse_slip_switch(config: &HashMap<String, String>) -> Option<SlipSwitch> {
-    let (left_slip, right_slip) = match config.get("doubleSwitchType")?.as_str() {
-        "0" => (true, true),
-        "1" => (true, false),
-        _ => return None,
-    };
-    let length: f32 = config.get("length")?.parse().ok()?;
-    let radius: f32 = config.get("radius")?.parse().ok()?;
-    let tangent: f32 = config.get("tangent")?.parse().ok()?;
-    Some(SlipSwitch {
-        radius,
-        length,
-        tangent,
-        left_slip,
-        right_slip,
-    })
+fn try_parse_slip_switch(_config: &HashMap<String, String>) -> Option<SlipSwitch> {
+    unimplemented!();
+
+    // let (left_slip, right_slip) = match config.get("doubleSwitchType")?.as_str() {
+    //     "0" => (true, true),
+    //     "1" => (true, false),
+    //     _ => return None,
+    // };
+    // let length: f32 = config.get("length")?.parse().ok()?;
+    // let radius: f32 = config.get("radius")?.parse().ok()?;
+    // let tangent: f32 = config.get("tangent")?.parse().ok()?;
+    // Some(SlipSwitch {
+    //     radius,
+    //     total_length: length,
+    //     tangent,
+    //     left_slip,
+    //     right_slip,
+    // })
 }
 
 // Values for prefabs extracted from game assets, version 2025.2.3.
 // `added_length` Rz 60E1-205-1_9 and Rz 60E1-265-1_10 fixed manually.
 // Crossings and slip switches were also added manually.
 pub(crate) static TRACK_STRUCTURES: phf::Map<&'static str, TrackStructure> = phf_map! {
-    "Rkp 60E1-190-1_9 ab" => Slip(SlipSwitch { length: 33.165 /* added manually */, radius: 190.0, tangent: 9.0, left_slip: true, right_slip: false }),
-    "Rkp 60E1-190-1_9 ba" => Slip(SlipSwitch { length: 33.165 /* added manually */, radius: 190.0, tangent: 9.0, left_slip: true, right_slip: false }),
-    "Rkpd 60E1-190-1_9" => Slip(SlipSwitch { length: 33.165 /* added manually */, radius: 190.0, tangent: 9.0, left_slip: true, right_slip: true }),
+    // TODO: Verify direction
+    "Rkp 60E1-190-1_9 ab" => Slip(SlipSwitch { total_length: 33.165, outer_length: 6.06, transition_length: 7.461676, radius: 190.0, tangent: 9.0, left_slip: false, right_slip: true }), // added manually
+    "Rkp 60E1-190-1_9 ba" => Slip(SlipSwitch { total_length: 33.165, outer_length: 6.06, transition_length: 7.461676, radius: 190.0, tangent: 9.0, left_slip: false, right_slip: true }), // added manually
+    "Rkpd 60E1-190-1_9" => Slip(SlipSwitch { total_length: 33.165, outer_length: 6.06, transition_length: 7.461676, radius: 190.0, tangent: 9.0, left_slip: true, right_slip: true }), // added manually
     "Rld 60E1-1200_600-1_15 L" => Fork(ForkSwitch { radius_1: 600.0, radius_2: -1200.0, curve_length: 39.95566, tangent: 12.0, added_length: 0.0 }),
     "Rld 60E1-1200_600-1_15 R" => Fork(ForkSwitch { radius_1: -600.0, radius_2: 1200.0, curve_length: 39.95566, tangent: 12.0, added_length: 0.0 }),
     "Rld 60E1-1200_900-1_18.5 L" => Fork(ForkSwitch { radius_1: 900.0, radius_2: -1200.0, curve_length: 48.61317, tangent: 12.0, added_length: 0.0 }),

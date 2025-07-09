@@ -4,6 +4,7 @@ use anyhow::{bail, ensure};
 use glam::{Mat3, Vec3, Vec3Swizzles};
 use lazy_regex::regex_captures;
 use std::collections::HashMap;
+use std::f32::consts::PI;
 use std::io::{BufRead, BufReader, Read};
 use std::mem::swap;
 
@@ -24,6 +25,12 @@ pub(crate) struct Checkpoint {
 impl Checkpoint {
     fn new(pos: Vec3, rotation: Mat3) -> Self {
         Checkpoint { pos, rotation }
+    }
+
+    /// Rotates the checkpoint by a given angle around the Y-axis,
+    /// before applying self.rotation.
+    fn rotate(self, angle: f32) -> Self {
+        Checkpoint { pos: self.pos, rotation: self.rotation * Mat3::from_rotation_y(angle) }
     }
 }
 
@@ -65,6 +72,14 @@ impl TrackShape {
             start: Checkpoint { pos: start_pos, rotation: point.rotation },
             end_pos,
             length: start_offset,
+        }
+    }
+
+    pub(crate) fn straight_between(start_pos: Vec3, end_pos: Vec3, rotation: Mat3) -> Self {
+        TrackShape::Straight {
+            start: Checkpoint { pos: start_pos, rotation },
+            end_pos,
+            length: (end_pos - start_pos).length(),
         }
     }
 
@@ -148,17 +163,6 @@ impl TrackIds {
         let prev = if prev.is_empty() { None } else { Some(prev.parse()?) };
         let next = if next.is_empty() { None } else { Some(next.parse()?) };
         Ok(TrackIds { own, prev, next })
-    }
-}
-
-impl TrackIds {
-    #[deprecated(note = "Temporary solution")]
-    pub(crate) fn placeholder() -> Self {
-        TrackIds {
-            own: -1,
-            prev: None,
-            next: None,
-        }
     }
 }
 
@@ -336,75 +340,141 @@ fn build_fork_switch(
     Ok(tracks)
 }
 
-fn build_slip_switch(start: Checkpoint, slip: &SlipSwitch, structure_name: &str) -> anyhow::Result<Vec<Track>> {
-    let half_angle = (1.0 / slip.tangent).atan() / 2.0;
-    let in_half_length = slip.radius * half_angle;
-    let out_half_length = slip.length / 2.0;
+fn build_slip_switch(
+    start: Checkpoint,
+    slip: &SlipSwitch,
+    mut subtracks: Vec<TrackIds>,
+    structure_name: &str,
+) -> anyhow::Result<Vec<Track>> {
+    let angle = (1.0 / slip.tangent).atan();
+    let half_angle = angle / 2.0;
+    let out_half_length = slip.total_length / 2.0;
+    let curve_length = slip.radius * angle;
 
-    // let left_rotation = rotation * Mat3::from_rotation_y(-half_angle);
-    // let right_rotation = rotation * Mat3::from_rotation_y(half_angle);
-    //
-    // let point_a_in = start + rotation * in_half_length * unit_vec_left;
-    // let point_b_in = start + rotation * in_half_length * unit_vec_right;
-    // let point_c_in = start + rotation * (in_half_length * -unit_vec_left);
-    // let point_d_in = start + rotation * (in_half_length * -unit_vec_right);
-    //
-    // let point_a_out = start + rotation * out_half_length * unit_vec_left;
-    // let point_b_out = start + rotation * out_half_length * unit_vec_right;
-    // let point_c_out = start + rotation * (out_half_length * -unit_vec_left);
-    // let point_d_out = start + rotation * (out_half_length * -unit_vec_right);
-    //
-    // let mut track_shapes: Vec<TrackShape> = vec![];
-    //
-    // track_shapes.push(TrackShape::Straight {
-    //     start: point_a_in,
-    //     end: point_c_in,
-    // });
-    // track_shapes.push(TrackShape::Straight {
-    //     start: point_b_in,
-    //     end: point_d_in,
-    // });
-    //
-    // if slip.left_slip {
-    //     let left_circle = RotatedCircle::new(190.0, rotation);
-    //     track_shapes.push(TrackShape::Arc {
-    //         start: point_b_in,
-    //         end: point_c_in,
-    //         rotated_circle: left_circle,
-    //     });
-    // }
-    // if slip.right_slip {
-    //     let right_circle = RotatedCircle::new(-190.0, rotation);
-    //     track_shapes.push(TrackShape::Arc {
-    //         start: point_a_in,
-    //         end: point_d_in,
-    //         rotated_circle: right_circle,
-    //     });
-    // }
-    //
-    // track_shapes.push(TrackShape::Straight {
-    //     start: point_a_out,
-    //     end: point_a_in,
-    // });
-    // track_shapes.push(TrackShape::Straight {
-    //     start: point_b_out,
-    //     end: point_b_in,
-    // });
-    // track_shapes.push(TrackShape::Straight {
-    //     start: point_c_out,
-    //     end: point_c_in,
-    // });
-    // track_shapes.push(TrackShape::Straight {
-    //     start: point_d_out,
-    //     end: point_d_in,
-    // });
-    //
-    // Ok(track_shapes.into_iter().map(|shape| Track::new(
-    //     TrackIds::placeholder(),
-    //     shape,
-    // )).collect())
+    let required_cound = 12 + if slip.left_slip { 2 } else { 0 } + if slip.right_slip { 2 } else { 0 };
+    ensure!(subtracks.len() == required_cound, "This slip switch must exactly at least {required_cound} subtracks");
 
-    Ok(vec![])
+    let first_center = start.rotate(half_angle);
+    let first_center_rev = start.rotate(half_angle + PI);
+    let second_center = start.rotate(-half_angle);
+    let second_center_rev = start.rotate(-half_angle + PI);
+
+    let (left_slip_ids, right_slip_ids) = match (slip.left_slip, slip.right_slip) {
+        (false, false) => (None, None),
+        (false, true) => {
+            let exit = subtracks.remove(13);
+            let enter = subtracks.remove(6);
+            (None, Some((enter, exit)))
+        },
+        (true, false) => {
+            let exit = subtracks.remove(13);
+            let enter = subtracks.remove(6);
+            (Some((enter, exit)), None)
+        },
+        (true, true) => {
+            let second_exit = subtracks.remove(15);
+            let first_exit = subtracks.remove(14);
+            let second_enter = subtracks.remove(7);
+            let first_enter = subtracks.remove(6);
+            (Some((first_enter, first_exit)), Some((second_enter, second_exit)))
+        },
+    };
+
+    let transition_begin = out_half_length - slip.outer_length;
+    let transition_end = transition_begin - slip.transition_length;
+
+    let build_straight_path = |
+        center: Checkpoint,
+        center_rev: Checkpoint,
+        enter_outer_index: usize,
+        enter_transition_index: usize,
+        crossing_index: usize,
+        exit_transition_index: usize,
+        exit_outer_index: usize,
+    | {
+        let enter_outer_ids = subtracks[enter_outer_index];
+        let exit_outer_ids = subtracks[exit_outer_index];
+
+        let enter_transition_ids = subtracks[enter_transition_index].with_prev(enter_outer_ids.own);
+        let exit_transition_ids = subtracks[exit_transition_index].with_prev(exit_outer_ids.own);
+        let enter_outer_ids = enter_outer_ids.with_next(enter_transition_ids.own);
+        let exit_outer_ids = exit_outer_ids.with_next(exit_transition_ids.own);
+
+        let crossing_ids = subtracks[crossing_index].with_prev(enter_transition_ids.own).with_next(exit_transition_ids.own);
+        let enter_transition_ids = enter_transition_ids.with_next(crossing_ids.own);
+        let exit_transition_ids = exit_transition_ids.with_next(crossing_ids.own);
+
+        [
+            Track::new_structure_end(
+                enter_outer_ids,
+                TrackShape::straight_around_point(center, -out_half_length, -transition_begin),
+                structure_name.to_string(),
+            ),
+            Track::new(
+                enter_transition_ids,
+                TrackShape::straight_around_point(center, -transition_begin, -transition_end),
+            ),
+            Track::new(
+                crossing_ids,
+                TrackShape::straight_around_point(center, -transition_end, transition_end),
+            ),
+            Track::new(
+                exit_transition_ids,
+                TrackShape::straight_around_point(center_rev, -transition_begin, -transition_end),
+            ),
+            Track::new_structure_end(
+                exit_outer_ids,
+                TrackShape::straight_around_point(center_rev, -out_half_length, -transition_begin),
+                structure_name.to_string(),
+            ),
+        ]
+    };
+
+    let first_path = build_straight_path(first_center, first_center_rev, 0, 4, 6, 10, 2);
+    let second_path = build_straight_path(second_center, second_center_rev, 1, 5, 7, 11, 3);
+
+    let build_slip = |
+        center_index: usize,
+        slip_ids: Option<(TrackIds, TrackIds)>,
+        enter_path: &[Track; 5],
+        exit_path: &[Track; 5],
+        neg_radius: bool,
+    | {
+        let center_ids = subtracks[center_index];
+        if let Some((enter_ids, exit_ids)) = slip_ids {
+            let radius = if neg_radius { -slip.radius } else { slip.radius };
+            let enter_curve = TrackShape::arc_or_straight(enter_path[0].shape.end(), radius, slip.transition_length);
+            let center_curve = TrackShape::arc_or_straight(enter_curve.end(), radius, curve_length - 2.0 * slip.transition_length);
+            let exit_curve = TrackShape::arc_or_straight(center_curve.end(), radius, slip.transition_length);
+
+            let enter_ids = enter_ids.with_prev(enter_path[0].ids.own).with_next(center_ids.own);
+            // TODO: set next for enter_path[0] and exit_path[4]
+            let exit_ids = exit_ids.with_prev(center_ids.own).with_next(exit_path[4].ids.own);
+            let center_ids = center_ids.with_prev(enter_ids.own).with_next(exit_ids.own);
+
+            vec![
+                Track::new(enter_ids, enter_curve),
+                Track::new(center_ids, center_curve),
+                Track::new(exit_ids, exit_curve),
+            ]
+        } else {
+            // Don't add prev or next, this track is not usable
+            let center_ids = center_ids;
+
+            vec![
+                Track::new(center_ids, TrackShape::straight_between(enter_path[1].shape.end().pos, exit_path[3].shape.end().pos, start.rotation)),
+            ]
+        }
+    };
+
+    let mut tracks: Vec<Track> = vec![];
+
+    tracks.extend(build_slip(8, left_slip_ids, &first_path, &second_path, false));
+    tracks.extend(build_slip(9, right_slip_ids, &second_path, &first_path, true));
+    tracks.extend(first_path);
+    tracks.extend(second_path);
+
+    Ok(tracks)
 }
 
 fn build_crossing(start: Checkpoint, crossing: &Crossing, subtracks: Vec<TrackIds>, structure_name: &str) -> anyhow::Result<Vec<Track>> {
@@ -462,7 +532,7 @@ fn parse_track_structure(cells: &[&str]) -> anyhow::Result<Switch> {
     let tracks: Vec<Track> = if let Some(track_structure) = TRACK_STRUCTURES.get(structure_name) {
         match track_structure {
             TrackStructure::Fork(fork) => build_fork_switch(start, fork, subtracks, structure_name)?,
-            TrackStructure::Slip(slip) => build_slip_switch(start, slip, structure_name)?,
+            TrackStructure::Slip(slip) => build_slip_switch(start, slip, subtracks, structure_name)?,
             TrackStructure::Crossing(crossing) => build_crossing(start, crossing, subtracks, structure_name)?,
         }
     } else {

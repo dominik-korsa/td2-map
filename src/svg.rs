@@ -135,15 +135,15 @@ pub fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyhow::Res
             .set("stroke-width", 1.2)
             .set("stroke-linecap", "round");
 
-        let track_inner_path = element::Path::new()
-            .set("id", format!("track_inner_{}", track.ids.own))
-            .set("inkscape:label", label)
-            .set("d", data)
-            .set("fill", "none")
-            .set("stroke", "#000")
-            .set("stroke-width", 0.3)
-            .set("stroke-linecap", "butt")
-            .set("stroke-dasharray", "0.5, 0.5");
+        // let track_inner_path = element::Path::new()
+        //     .set("id", format!("track_inner_{}", track.ids.own))
+        //     .set("inkscape:label", label)
+        //     .set("d", data)
+        //     .set("fill", "none")
+        //     .set("stroke", "#000")
+        //     .set("stroke-width", 0.3)
+        //     .set("stroke-linecap", "butt")
+        //     .set("stroke-dasharray", "0.5, 0.5");
 
         map_elements.push(MapElement {
             y: track.shape.lowest_y() - 4.0,
@@ -153,10 +153,10 @@ pub fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyhow::Res
             y: track.shape.lowest_y(),
             node: Box::new(track_path),
         });
-        map_elements.push(MapElement {
-            y: track.shape.lowest_y() + 1.0,
-            node: Box::new(track_inner_path),
-        });
+        // map_elements.push(MapElement {
+        //     y: track.shape.lowest_y() + 1.0,
+        //     node: Box::new(track_inner_path),
+        // });
 
         let projected_start = project_pos(&track.shape.start().pos);
         let projected_end = project_pos(&track.shape.end().pos);
