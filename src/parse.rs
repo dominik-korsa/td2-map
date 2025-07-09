@@ -205,7 +205,7 @@ fn build_fork_switch(
 }
 
 fn build_slip_switch(start: Vec3, rotation: Mat3, slip: &SlipSwitch) -> Vec<TrackShape> {
-    let half_angle = (slip.tangent / 2.0).atan();
+    let half_angle = (1.0 / slip.tangent / 2.0).atan();
     let in_half_length = slip.radius * half_angle;
     let out_half_length = slip.length / 2.0;
 
@@ -234,18 +234,18 @@ fn build_slip_switch(start: Vec3, rotation: Mat3, slip: &SlipSwitch) -> Vec<Trac
     });
 
     if slip.left_slip {
-        let left_circle = RotatedCircle::new(-190.0, rotation);
+        let left_circle = RotatedCircle::new(190.0, rotation);
         track_shapes.push(TrackShape::Arc {
-            start: point_a_in,
-            end: point_d_in,
+            start: point_b_in,
+            end: point_c_in,
             rotated_circle: left_circle,
         });
     }
     if slip.right_slip {
-        let right_circle = RotatedCircle::new(190.0, rotation);
+        let right_circle = RotatedCircle::new(-190.0, rotation);
         track_shapes.push(TrackShape::Arc {
-            start: point_b_in,
-            end: point_c_in,
+            start: point_a_in,
+            end: point_d_in,
             rotated_circle: right_circle,
         });
     }
@@ -259,12 +259,12 @@ fn build_slip_switch(start: Vec3, rotation: Mat3, slip: &SlipSwitch) -> Vec<Trac
         end: point_b_in,
     });
     track_shapes.push(TrackShape::Straight {
-        start: point_c_in,
-        end: point_c_out,
+        start: point_c_out,
+        end: point_c_in,
     });
     track_shapes.push(TrackShape::Straight {
-        start: point_d_in,
-        end: point_d_out,
+        start: point_d_out,
+        end: point_d_in,
     });
 
     track_shapes
