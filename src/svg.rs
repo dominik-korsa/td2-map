@@ -104,7 +104,7 @@ pub fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyhow::Res
         let data = path_data(&track.shape);
 
         let label = format!(
-            "Track {}, prev: {}, next: {}.\nShape: {:?}",
+            "Track {}, prev: {}, next: {:?}.\nShape: {:?}",
             track.ids.own,
             track
                 .ids
@@ -113,9 +113,7 @@ pub fn create_svg(parse_result: &ParseResult, output_path: &Path) -> anyhow::Res
                 .unwrap_or("-".to_string()),
             track
                 .ids
-                .next
-                .map(|x| x.to_string())
-                .unwrap_or("-".to_string()),
+                .next,
             track.shape,
         );
 

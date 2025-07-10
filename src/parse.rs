@@ -169,10 +169,17 @@ impl TrackShape {
 }
 
 #[derive(Debug, Copy, Clone)]
+pub(crate) enum NextIds {
+    None,
+    One(i32),
+    Two(i32, i32),
+}
+
+#[derive(Debug, Copy, Clone)]
 pub struct TrackIds {
     pub own: i32,
     pub(crate) prev: Option<i32>,
-    pub(crate) next: Option<i32>,
+    pub(crate) next: NextIds,
 }
 
 impl TrackIds {
@@ -181,15 +188,32 @@ impl TrackIds {
         self
     }
 
-    pub(crate) fn with_next(mut self, id: i32) -> Self {
-        self.next = Some(id);
+    pub(crate) fn with_one_next(mut self, id: i32) -> Self {
+        self.next = NextIds::One(id);
+        self
+    }
+
+    pub(crate) fn with_two_next(mut self, id1: i32, id2: i32) -> Self {
+        self.next = NextIds::Two(id1, id2);
+        self
+    }
+
+    pub(crate) fn add_next(mut self, id: i32) -> Self {
+        use NextIds::*;
+        self.next = match self.next {
+            None => One(id),
+            One(id1) => Two(id1, id),
+            Two(_, _) => {
+                panic!("add_next called on TracksIds with two next ids already set");
+            }
+        };
         self
     }
 
     pub(crate) fn parse(own: &str, prev: &str, next: &str) -> anyhow::Result<Self> {
         let own = own.parse()?;
         let prev = if prev.is_empty() { None } else { Some(prev.parse()?) };
-        let next = if next.is_empty() { None } else { Some(next.parse()?) };
+        let next = if next.is_empty() { NextIds::None } else { NextIds::One(next.parse()?) };
         Ok(TrackIds { own, prev, next })
     }
 }
@@ -326,6 +350,9 @@ fn build_fork_switch(
     } else {
         (first_end_id.own, second_end_id.own)
     };
+    let start_id = start_id.with_two_next(first_curve_id.own, second_curve_id.own);
+    let first_curve_id = first_curve_id.with_prev(start_id.own).with_one_next(first_after_curve_id);
+    let second_curve_id = second_curve_id.with_prev(start_id.own).with_one_next(second_after_curve_id);
 
     let start_shape = TrackShape::point(start);
 
@@ -339,8 +366,8 @@ fn build_fork_switch(
 
     let mut tracks: Vec<Track> = vec![
         Track::new(start_id, start_shape),
-        Track::new(first_curve_id.with_prev(start_id.own).with_next(first_after_curve_id), first_curve_shape),
-        Track::new(second_curve_id.with_prev(start_id.own).with_next(second_after_curve_id), second_curve_shape),
+        Track::new(first_curve_id, first_curve_shape),
+        Track::new(second_curve_id, second_curve_shape),
     ];
 
     if let Some((first_extra_id, second_extra_id)) = extra_ids {
@@ -350,8 +377,8 @@ fn build_fork_switch(
         first_current_end = first_extra_shape.end();
         second_current_end = second_extra_shape.end();
 
-        tracks.push(Track::new(first_extra_id.with_prev(first_current_end_id).with_next(first_end_id.own), first_extra_shape));
-        tracks.push(Track::new(second_extra_id.with_prev(second_current_end_id).with_next(second_end_id.own), second_extra_shape));
+        tracks.push(Track::new(first_extra_id.with_prev(first_current_end_id).with_one_next(first_end_id.own), first_extra_shape));
+        tracks.push(Track::new(second_extra_id.with_prev(second_current_end_id).with_one_next(second_end_id.own), second_extra_shape));
 
         first_current_end_id = first_extra_id.own;
         second_current_end_id = second_extra_id.own;
@@ -424,12 +451,12 @@ fn build_slip_switch(
 
         let enter_transition_ids = subtracks[enter_transition_index].with_prev(enter_outer_ids.own);
         let exit_transition_ids = subtracks[exit_transition_index].with_prev(exit_outer_ids.own);
-        let enter_outer_ids = enter_outer_ids.with_next(enter_transition_ids.own);
-        let exit_outer_ids = exit_outer_ids.with_next(exit_transition_ids.own);
+        let enter_outer_ids = enter_outer_ids.with_one_next(enter_transition_ids.own);
+        let exit_outer_ids = exit_outer_ids.with_one_next(exit_transition_ids.own);
 
-        let crossing_ids = subtracks[crossing_index].with_prev(enter_transition_ids.own).with_next(exit_transition_ids.own);
-        let enter_transition_ids = enter_transition_ids.with_next(crossing_ids.own);
-        let exit_transition_ids = exit_transition_ids.with_next(crossing_ids.own);
+        let crossing_ids = subtracks[crossing_index].with_prev(enter_transition_ids.own).with_one_next(exit_transition_ids.own);
+        let enter_transition_ids = enter_transition_ids.with_one_next(crossing_ids.own);
+        let exit_transition_ids = exit_transition_ids.with_one_next(crossing_ids.own);
 
         [
             Track::new_structure_end(
@@ -457,14 +484,14 @@ fn build_slip_switch(
         ]
     };
 
-    let first_path = build_straight_path(first_center, first_center_rev, 0, 4, 6, 10, 2);
-    let second_path = build_straight_path(second_center, second_center_rev, 1, 5, 7, 11, 3);
+    let mut first_path = build_straight_path(first_center, first_center_rev, 0, 4, 6, 10, 2);
+    let mut second_path = build_straight_path(second_center, second_center_rev, 1, 5, 7, 11, 3);
 
     let build_slip = |
         center_index: usize,
         slip_ids: Option<(TrackIds, TrackIds)>,
-        enter_path: &[Track; 5],
-        exit_path: &[Track; 5],
+        enter_path: &mut [Track; 5],
+        exit_path: &mut [Track; 5],
         neg_radius: bool,
     | {
         let center_ids = subtracks[center_index];
@@ -474,10 +501,11 @@ fn build_slip_switch(
             let center_curve = TrackShape::arc_or_straight(enter_curve.end(), radius, curve_length - 2.0 * slip.transition_length);
             let exit_curve = TrackShape::arc_or_straight(center_curve.end(), radius, slip.transition_length);
 
-            let enter_ids = enter_ids.with_prev(enter_path[0].ids.own).with_next(center_ids.own);
-            // TODO: set next for enter_path[0] and exit_path[4]
-            let exit_ids = exit_ids.with_prev(center_ids.own).with_next(exit_path[4].ids.own);
-            let center_ids = center_ids.with_prev(enter_ids.own).with_next(exit_ids.own);
+            let enter_ids = enter_ids.with_prev(enter_path[0].ids.own).with_one_next(center_ids.own);
+            let exit_ids = exit_ids.with_prev(center_ids.own).with_one_next(exit_path[4].ids.own);
+            enter_path[0].ids = enter_path[0].ids.add_next(enter_ids.own);
+            exit_path[4].ids = exit_path[4].ids.add_next(exit_ids.own);
+            let center_ids = center_ids.with_prev(enter_ids.own).with_one_next(exit_ids.own);
 
             vec![
                 Track::new(enter_ids, enter_curve),
@@ -496,8 +524,8 @@ fn build_slip_switch(
 
     let mut tracks: Vec<Track> = vec![];
 
-    tracks.extend(build_slip(8, left_slip_ids, &first_path, &second_path, false));
-    tracks.extend(build_slip(9, right_slip_ids, &second_path, &first_path, true));
+    tracks.extend(build_slip(8, left_slip_ids, &mut first_path, &mut second_path, false));
+    tracks.extend(build_slip(9, right_slip_ids, &mut second_path, &mut first_path, true));
     tracks.extend(first_path);
     tracks.extend(second_path);
 
@@ -576,8 +604,8 @@ fn find_failed_connections(tracks: &Vec<Track>, track_indexes: &HashMap<i32, usi
     let mut failed_connections: Vec<FailedConnection> = vec![];
 
     for track in tracks {
-        let mut check_neighbour = |id: Option<i32>, pos: Vec3| {
-            if let Some(other_index) = id.and_then(|id| track_indexes.get(&id)) {
+        let mut check_neighbour = |id: i32, pos: Vec3| {
+            if let Some(other_index) = track_indexes.get(&id) {
                 let other = &tracks[*other_index];
                 let mut dist_min = (other.shape.start().pos, (other.shape.start().pos.xz() - pos.xz()).length_squared()) ;
                 let mut dist_max = (other.shape.end().pos, (other.shape.end().pos.xz() - pos.xz()).length_squared());
@@ -608,8 +636,17 @@ fn find_failed_connections(tracks: &Vec<Track>, track_indexes: &HashMap<i32, usi
                 }
             }
         };
-        check_neighbour(track.ids.prev, track.shape.start().pos);
-        check_neighbour(track.ids.next, track.shape.end().pos);
+        if let Some(prev_id) = track.ids.prev {
+            check_neighbour(prev_id, track.shape.start().pos);
+        }
+        match track.ids.next {
+            NextIds::None => {},
+            NextIds::One(id) => check_neighbour(id, track.shape.end().pos),
+            NextIds::Two(id1, id2) => {
+                check_neighbour(id1, track.shape.end().pos);
+                check_neighbour(id2, track.shape.end().pos);
+            },
+        }
     }
 
     failed_connections
