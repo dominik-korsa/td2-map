@@ -1,4 +1,5 @@
 use crate::parse::Checkpoint;
+use geo_nd::Vector;
 use glam::{Mat3, Vec2, Vec3};
 use nalgebra::{Matrix2, SVD};
 
@@ -85,4 +86,16 @@ pub(crate) fn project_circle(circle: &RotatedCircle) -> EllipseAxes {
 
 pub(crate) fn project_pos(vec: &Vec3) -> Vec2 {
     transform(Vec2::new(vec.x, vec.z))
+}
+
+pub(crate) type GeoNdPoint = geo_nd::FArray<f32, 3>;
+
+pub(crate) trait Vec3Ext {
+    fn to_geo_nd(&self) -> GeoNdPoint;
+}
+
+impl Vec3Ext for Vec3 {
+    fn to_geo_nd(&self) -> GeoNdPoint {
+        GeoNdPoint::from_array(self.to_array())
+    }
 }

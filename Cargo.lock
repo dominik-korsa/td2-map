@@ -33,6 +33,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
+name = "bezier-nd"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85352a02b197f78689ea253808ada1b5821a39390c402bd700d18d140cfe176b"
+dependencies = [
+ "geo-nd",
+ "num-traits",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -105,6 +115,16 @@ name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
+
+[[package]]
+name = "geo-nd"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b7b61038ea80c1741bf761ea8780401e9060da7de89c705b12b8d8d42767b8a"
+dependencies = [
+ "num-traits",
+ "serde",
+]
 
 [[package]]
 name = "glam"
@@ -466,6 +486,8 @@ name = "td2-map"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bezier-nd",
+ "geo-nd",
  "glam",
  "indicatif",
  "lazy-regex",

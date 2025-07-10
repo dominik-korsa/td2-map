@@ -54,6 +54,7 @@ fn path_data(track_shape: &TrackShape) -> Data {
             control1,
             control2,
             end_pos: end,
+            ..
         } => {
             let projected_start = project_pos(start);
             let projected_control1 = project_pos(control1);

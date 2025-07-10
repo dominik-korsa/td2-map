@@ -1,12 +1,15 @@
-use crate::math::RotatedCircle;
+use crate::math::{RotatedCircle, Vec3Ext};
 use crate::track_structures::{Crossing, ForkSwitch, SlipSwitch, TrackStructure, TRACK_STRUCTURES};
 use anyhow::{bail, ensure};
+use bezier_nd::Bezier;
 use glam::{Mat3, Vec3, Vec3Swizzles};
 use lazy_regex::regex_captures;
 use std::collections::HashMap;
 use std::f32::consts::PI;
 use std::io::{BufRead, BufReader, Read};
 use std::mem::swap;
+
+static BEZIER_STRAIGHTNESS: f32 = 0.01;
 
 #[derive(Debug)]
 enum State {
@@ -53,6 +56,7 @@ pub(crate) enum TrackShape {
         control1: Vec3,
         control2: Vec3,
         end_pos: Vec3,
+        length: f32,
     },
     Point(Checkpoint),
 }
@@ -101,6 +105,30 @@ impl TrackShape {
         }
         let angle = length / radius.abs();
         TrackShape::arc(start, radius, angle, length)
+    }
+
+    pub(crate) fn bezier(
+        start_pos: Vec3,
+        control1: Vec3,
+        control2: Vec3,
+        end_pos: Vec3,
+    ) -> Self {
+        let bezier = Bezier::cubic(
+            &start_pos.to_geo_nd(),
+            &control1.to_geo_nd(),
+            &control2.to_geo_nd(),
+            &end_pos.to_geo_nd(),
+        );
+
+        let length = bezier.length(BEZIER_STRAIGHTNESS);
+
+        TrackShape::Bezier {
+            start_pos,
+            control1,
+            control2,
+            end_pos,
+            length,
+        }
     }
 
     pub(crate) fn point(point: Checkpoint) -> Self {
@@ -251,12 +279,11 @@ fn parse_bezier_track(cells: &[&str]) -> anyhow::Result<Track> {
     let start_to_control2 = start_to_end + end_to_control2;
     let rotation = Mat3::IDENTITY;
 
-    let shape = TrackShape::Bezier {
-        start_pos,
-        control1: start_pos + rotation * start_to_control1,
-        control2: start_pos + rotation * start_to_control2,
-        end_pos: start_pos + rotation * start_to_end,
-    };
+    let control1 = start_pos + rotation * start_to_control1;
+    let control2 = start_pos + rotation * start_to_control2;
+    let end_pos = start_pos + rotation * start_to_end;
+
+    let shape = TrackShape::bezier(start_pos, control1, control2, end_pos);
     Ok(Track::new(ids, shape))
 }
 
