@@ -400,7 +400,7 @@ fn build_slip_switch(
     mut subtracks: Vec<TrackIds>,
     structure_name: &str,
 ) -> anyhow::Result<Vec<Track>> {
-    let angle = (1.0 / slip.tangent).atan();
+    let angle = (1.0 / slip.tangent_inv).atan();
     let half_angle = angle / 2.0;
     let out_half_length = slip.total_length / 2.0;
     let curve_length = slip.radius * angle;
@@ -535,7 +535,7 @@ fn build_slip_switch(
 fn build_crossing(start: Checkpoint, crossing: &Crossing, subtracks: Vec<TrackIds>, structure_name: &str) -> anyhow::Result<Vec<Track>> {
     ensure!(subtracks.len() == 2, "Crossing must have exactly two subtracks");
 
-    let half_angle = (1.0 / crossing.tangent).atan() / 2.0;
+    let half_angle = (1.0 / crossing.tangent_inv).atan() / 2.0;
     let half_length = crossing.length / 2.0;
 
     let bd_start = Checkpoint {
